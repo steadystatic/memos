@@ -20,6 +20,9 @@ importers:
       '@connectrpc/connect-web':
         specifier: ^2.1.1
         version: 2.1.1(@bufbuild/protobuf@2.12.0(patch_hash=9d60cec35402ba36bc21a72fefc68ccef8db0acb883504cc47c05a00a0029f8c))(@connectrpc/connect@2.1.1(@bufbuild/protobuf@2.12.0(patch_hash=9d60cec35402ba36bc21a72fefc68ccef8db0acb883504cc47c05a00a0029f8c)))
+      '@fontsource-variable/lexend':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@github/relative-time-element':
         specifier: ^5.0.0
         version: 5.0.0
@@ -451,6 +454,9 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
+
+  '@fontsource-variable/lexend@5.3.0':
+    resolution: {integrity: sha512-3SXtiZ8rFbT0oaPzEboCG5RM3jtyhpNxandh1jWNLqvrJRfV/eP3R+GGw+o5e3hS1uqmAGutKxSvaWG5oyrimA==}
 
   '@github/relative-time-element@5.0.0':
     resolution: {integrity: sha512-L/2r0DNR/rMbmHWcsdmhtOiy2gESoGOhItNFD4zJ3nZfHl79Dx3N18Vfx/pYr2lruMOdk1cJZb4wEumm+Dxm1w==}
@@ -2017,6 +2023,8 @@ snapshots:
       react-dom: 19.2.6(react@19.2.6)
 
   '@floating-ui/utils@0.2.12': {}
+
+  '@fontsource-variable/lexend@5.3.0': {}
 
   '@github/relative-time-element@5.0.0': {}
 

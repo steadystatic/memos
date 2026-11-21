@@ -1,5 +1,6 @@
 @layer theme, base, mu, components, utilities;
 @import "tailwindcss";
+@import "@fontsource-variable/lexend";
 @import "@usememos/ui/tokens.css";
 @import "@usememos/ui/styles.css";
 @import "@usememos/ui/tailwind.css";

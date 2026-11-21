@@ -1,0 +1,28 @@
+# Build and local output
+/build/
+/bin/
+/tmp/
+/memos
+/memos.exe
+coverage.out
+/.pnpm-store/
+/.worktrees/
+
+# Not used by the image build
+/web/node_modules/
+/web/dist/
+/docs/
+/.github/
+*.md
+/.gitignore
+/.dockerignore
+/.golangci.yaml
+
+# Local metadata and secrets
+/.git/
+/.env
+/.env.*
+/.idea/
+/.vscode/
+/.claude/
+**/.DS_Store

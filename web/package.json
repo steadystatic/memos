@@ -21,6 +21,7 @@
     "@base-ui/react": "1.9.0",
     "@connectrpc/connect": "^2.1.1",
     "@connectrpc/connect-web": "^2.1.1",
+    "@fontsource-variable/lexend": "^5.3.0",
     "@github/relative-time-element": "^5.0.0",
     "@maplibre/maplibre-gl-leaflet": "^0.1.4",
     "@pierre/highlights": "0.3.0",

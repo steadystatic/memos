@@ -1,9 +1,12 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -148,6 +151,83 @@ func newMCPToolHandler(adapter *apiAdapter, operation *registeredOperation) sdkm
 	}
 }
 
+// maxMCPControlPeekBytes bounds how many bytes RegisterRoutes inspects to handle
+// stateless client notifications (e.g. notifications/roots/list_changed) and ping
+// without buffering large tool payloads such as attachment uploads.
+const maxMCPControlPeekBytes = 4096
+
+type mcpControlEnvelope struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method"`
+}
+
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// normalizeMCPAccept ensures POST /mcp carries both media types required by go-sdk's
+// StreamableHTTPHandler when a JSON-only client omits text/event-stream (safe because
+// memos runs with JSONResponse: true and never streams SSE).
+func normalizeMCPAccept(r *http.Request) {
+	if r.Method != http.MethodPost {
+		return
+	}
+	values := r.Header.Values("Accept")
+	if len(values) == 0 {
+		r.Header.Set("Accept", "application/json, text/event-stream")
+		return
+	}
+	joined := strings.ToLower(strings.Join(values, ","))
+	if strings.Contains(joined, "*/*") {
+		return
+	}
+	if strings.Contains(joined, "application/json") && !strings.Contains(joined, "text/event-stream") {
+		r.Header.Add("Accept", "text/event-stream")
+	} else if strings.TrimSpace(joined) == "" {
+		r.Header.Set("Accept", "application/json, text/event-stream")
+	}
+}
+
+// handleStatelessControlMessage short-circuits client notifications (notifications/*)
+// and ping requests that memos's stateless, tools-only MCP server always accepts as
+// no-ops. This avoids 400 Bad Request failures when MCP clients send legacy/background
+// notifications (such as notifications/roots/list_changed) or ping on a 2026-07-28
+// session without _meta or Mcp-Method headers.
+func handleStatelessControlMessage(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodPost || r.Body == nil || r.ContentLength > maxMCPControlPeekBytes {
+		return false
+	}
+
+	peek, err := io.ReadAll(io.LimitReader(r.Body, maxMCPControlPeekBytes+1))
+	if err != nil || len(peek) > maxMCPControlPeekBytes {
+		r.Body = readCloser{Reader: io.MultiReader(bytes.NewReader(peek), r.Body), Closer: r.Body}
+		return false
+	}
+
+	var env mcpControlEnvelope
+	if json.Unmarshal(peek, &env) == nil && env.JSONRPC == "2.0" {
+		idTrimmed := bytes.TrimSpace(env.ID)
+		hasID := len(idTrimmed) > 0 && !bytes.Equal(idTrimmed, []byte("null"))
+		if !hasID && strings.HasPrefix(env.Method, "notifications/") {
+			w.WriteHeader(http.StatusAccepted)
+			return true
+		}
+		if hasID && env.Method == "ping" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":`))
+			_, _ = w.Write(idTrimmed)
+			_, _ = w.Write([]byte(`,"result":{}}`))
+			return true
+		}
+	}
+
+	r.Body = readCloser{Reader: bytes.NewReader(peek), Closer: r.Body}
+	return false
+}
+
 // RegisterRoutes registers the streamable HTTP MCP endpoint.
 func (s *MCPService) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +240,10 @@ func (s *MCPService) RegisterRoutes(mux *http.ServeMux) {
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxMCPRequestBytes)
+		normalizeMCPAccept(r)
+		if handleStatelessControlMessage(w, r) {
+			return
+		}
 		s.handler.ServeHTTP(w, r)
 	})
 }

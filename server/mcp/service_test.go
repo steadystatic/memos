@@ -820,6 +820,75 @@ func TestMCPRequestBodyLimitMatchesAPI(t *testing.T) {
 	require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
 }
 
+// TestMCPStatelessAcceptsClientNotificationsAndPing guards against strict 2026-07-28
+// and Accept header rejections on stateless no-op notifications (such as
+// notifications/roots/list_changed) and ping requests.
+func TestMCPStatelessAcceptsClientNotificationsAndPing(t *testing.T) {
+	mux := http.NewServeMux()
+	service, err := NewMCPService(&profile.Profile{Version: "test-version"}, mux)
+	require.NoError(t, err)
+	service.RegisterRoutes(mux)
+
+	for _, tc := range []struct {
+		name    string
+		headers map[string]string
+		body    string
+	}{
+		{
+			name: "roots notification on 2026-07-28 without _meta or Mcp-Method",
+			headers: map[string]string{
+				"Mcp-Protocol-Version": "2026-07-28",
+				"Accept":               "application/json, text/event-stream",
+			},
+			body: `{"jsonrpc":"2.0","method":"notifications/roots/list_changed"}`,
+		},
+		{
+			name: "roots notification with JSON-only Accept",
+			headers: map[string]string{
+				"Accept": "application/json",
+			},
+			body: `{"jsonrpc":"2.0","method":"notifications/roots/list_changed","params":{}}`,
+		},
+		{
+			name:    "initialized notification with empty Accept",
+			headers: map[string]string{"Accept": ""},
+			body:    `{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			for k, v := range tc.headers {
+				req.Header.Set(k, v)
+			}
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+		})
+	}
+
+	t.Run("ping on 2026-07-28 without _meta", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":42,"method":"ping"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Mcp-Protocol-Version", "2026-07-28")
+		req.Header.Set("Accept", "application/json")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.JSONEq(t, `{"jsonrpc":"2.0","id":42,"result":{}}`, rec.Body.String())
+	})
+
+	t.Run("initialize with JSON-only Accept succeeds", func(t *testing.T) {
+		body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}`
+		req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	})
+}
+
 func postMCPWithHeaders(t *testing.T, mux http.Handler, payload map[string]any, headers map[string]string) map[string]any {
 	t.Helper()
 	data, err := json.Marshal(payload)

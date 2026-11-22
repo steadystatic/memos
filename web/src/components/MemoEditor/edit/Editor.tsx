@@ -1,11 +1,12 @@
 import type { EditorMode, Editor as MarkdownEditorInstance } from "@usememos/editor";
-import { forwardRef, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
+import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTagCounts } from "@/hooks/useUserQueries";
 import { MEMO_FOCUS_EDITOR_THEME } from "@/lib/memo-markdown";
 import { cn } from "@/lib/utils";
 import type { Attachment } from "@/types/proto/api/attachment_service_pb";
 import { useTranslate } from "@/utils/i18n";
 import { MemoMarkdown } from "../MemoMarkdown";
+import MobileFormatBar, { isTouchDevice } from "./components/MobileFormatBar";
 import { createController } from "./controller";
 import type { EditorController } from "./types/editorController";
 import "./editor.css";
@@ -41,6 +42,14 @@ const Editor = forwardRef(function Editor(props: EditorProps, ref: React.Forward
   const { className, value, placeholder, onContentChange, onFiles, onSubmit, isFocusMode, mode, attachments } = props;
   const t = useTranslate();
   const editorRef = useRef<MarkdownEditorInstance | null>(null);
+  // Fork: the docked mobile formatting bar needs to follow the live editor instance.
+  const [editorInstance, setEditorInstance] = useState<MarkdownEditorInstance | null>(null);
+  const attachEditor = useCallback((instance: MarkdownEditorInstance | null) => {
+    editorRef.current = instance;
+    setEditorInstance(instance);
+  }, []);
+  // Read once, like the editor's other options. On touch the native selection menu covers the floating toolbar.
+  const [floatingToolbar] = useState(() => !isTouchDevice());
   // The extensions read the latest callbacks through refs, written after commit so
   // a render React discards never leaves its callbacks behind.
   const onContentChangeRef = useRef(onContentChange);
@@ -86,7 +95,8 @@ const Editor = forwardRef(function Editor(props: EditorProps, ref: React.Forward
     >
       <div className={cn("memo-editor-scroller w-full text-base leading-6", isFocusMode && "min-h-0 flex-1")}>
         <MemoMarkdown
-          editorRef={editorRef}
+          editorRef={attachEditor}
+          toolbar={floatingToolbar}
           value={value}
           editable
           onChange={onContentChange}
@@ -100,6 +110,7 @@ const Editor = forwardRef(function Editor(props: EditorProps, ref: React.Forward
           className="memo-editor-root"
         />
       </div>
+      {!floatingToolbar && <MobileFormatBar editor={editorInstance} />}
     </div>
   );
 });

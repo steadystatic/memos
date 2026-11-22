@@ -9,6 +9,7 @@ import AppSidebar, {
   SidebarResizeHandle,
   useSidebarWidth,
 } from "@/components/AppSidebar";
+import SpaceQuickSwitcher from "@/components/SpaceQuickSwitcher";
 import { AppSidebarProvider } from "@/contexts/AppSidebarContext";
 import { GlobalMemoEditorProvider } from "@/contexts/GlobalMemoEditorContext";
 import { useInstance } from "@/contexts/InstanceContext";
@@ -106,6 +107,11 @@ const RootLayoutContent = () => {
         className={cn("flex w-full min-w-0 flex-col items-center md:ps-(--app-sidebar-width)", fullBleed ? "h-full min-h-0" : "min-h-full")}
       >
         <MobileAppHeader />
+        {md && (
+          <div className="sticky top-0 z-20 flex h-10 w-full shrink-0 items-center justify-end px-4 sm:px-6">
+            <SpaceQuickSwitcher />
+          </div>
+        )}
         {profile.demo && <DemoBanner />}
         <Outlet />
       </main>

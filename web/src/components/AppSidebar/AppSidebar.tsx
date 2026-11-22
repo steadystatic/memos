@@ -24,6 +24,7 @@ import { MAP_MEMO_FILTER } from "@/components/MapView/useMapMemos";
 import { MemoDetailSidebar } from "@/components/MemoDetailSidebar";
 import MemoDisplaySettingMenu from "@/components/MemoDisplaySettingMenu";
 import { DEFAULT_SETTING_SECTION, SETTINGS_SECTIONS } from "@/components/Settings/settingSections";
+import SpaceQuickSwitcher from "@/components/SpaceQuickSwitcher";
 import StatisticsView from "@/components/StatisticsView";
 import { type AttachmentSection, type InboxFilter, useAppSidebar } from "@/contexts/AppSidebarContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -449,6 +450,7 @@ export const MobileAppHeader = () => {
         <Tooltip.Popup side="bottom">{t("common.open-navigation")}</Tooltip.Popup>
       </Tooltip.Root>
       <SpaceSwitcher className="max-w-[12rem]" size="md" />
+      <SpaceQuickSwitcher className="ms-auto" />
     </header>
   );
 };

@@ -27,6 +27,7 @@ import {
   useMemoInit,
   useMemoSave,
 } from "./hooks";
+import { useAgentSpaceVisibility } from "./hooks/useAgentSpaceVisibility";
 import { canChooseSpaceFor } from "./initialState";
 import { cacheService, errorService, transcriptionService } from "./services";
 import { useEditorContext, useEditorSelector } from "./state";
@@ -96,6 +97,8 @@ export const EditSession: React.FC<EditSessionProps> = ({
   const draftSpace = useEditorSelector((s) => s.metadata.space);
   const canChooseSpace = canChooseSpaceFor({ memo, currentUser, parentMemoName, defaultSpace });
   const editorSpace = memo ? draftSpace : parentMemoName ? undefined : (defaultSpace ?? draftSpace);
+  // Fork: new notes in a Space shared with the Agent user default to the Members audience.
+  useAgentSpaceVisibility({ space: editorSpace, enabled: !memo && !parentMemoName });
   const canTranscribe = useMemo(() => {
     const providerId = aiSetting.transcription?.providerId ?? "";
     if (!providerId) return false;

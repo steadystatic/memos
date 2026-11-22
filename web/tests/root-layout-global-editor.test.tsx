@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import RootLayout from "@/layouts/RootLayout";
 
 vi.mock("@/hooks/useMemoSuggestions", () => ({ useMemoSuggestions: () => [] }));
+vi.mock("@/components/SpaceQuickSwitcher", () => ({ default: () => null }));
 
 const authState = vi.hoisted(() => ({ currentUser: { name: "users/test" } as { name: string } | undefined }));
 const instanceState = vi.hoisted(() => ({ accessMode: 2, instanceUrl: "https://example.com", demo: true }));

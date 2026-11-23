@@ -60,6 +60,10 @@ const (
 
 	publicAttachmentCacheControl  = "public, no-cache"
 	privateAttachmentCacheControl = "private, no-store"
+	// privateAttachmentRevalidateControl lets the browser keep an authorized private attachment but
+	// check with the server on every use. The request is authorized again each time, a replaced
+	// file is never served stale, and an unchanged one costs a 304 instead of the whole file.
+	privateAttachmentRevalidateControl = "private, no-cache"
 )
 
 // xssUnsafeTypes contains MIME types that could execute scripts if served directly.
@@ -173,6 +177,8 @@ func (s *FileServerService) serveAttachmentFile(w http.ResponseWriter, r *http.R
 	}
 	if readClass == access.MemoReadClassPublic {
 		w.Header().Set("Cache-Control", publicAttachmentCacheControl)
+	} else {
+		w.Header().Set("Cache-Control", privateAttachmentRevalidateControl)
 	}
 	if attachment.StorageType != storepb.AttachmentStorageType_LOCAL && attachment.StorageType != storepb.AttachmentStorageType_S3 {
 		attachment, err = s.Store.GetAttachment(ctx, &store.FindAttachment{ID: &attachment.ID, GetBlob: true})
@@ -283,7 +289,9 @@ func (s *FileServerService) serveStaticFile(w http.ResponseWriter, r *http.Reque
 		} else {
 			setSecurityHeaders(w)
 			setMediaHeaders(w, "image/jpeg", attachment.Type)
-			return httphandler.Blob(w, http.StatusOK, "image/jpeg", thumbnailBlob)
+			// ServeContent adds Last-Modified and answers a conditional request with a 304.
+			http.ServeContent(w, r, "", time.Unix(attachment.UpdatedTs, 0), bytes.NewReader(thumbnailBlob))
+			return nil
 		}
 	}
 
@@ -301,7 +309,8 @@ func (s *FileServerService) serveStaticFile(w http.ResponseWriter, r *http.Reque
 	case storepb.AttachmentStorageType_S3:
 		return s.streamS3Object(w, r, attachment, contentType)
 	default:
-		return httphandler.Blob(w, http.StatusOK, contentType, attachment.Blob)
+		http.ServeContent(w, r, "", time.Unix(attachment.UpdatedTs, 0), bytes.NewReader(attachment.Blob))
+		return nil
 	}
 }
 

@@ -9,6 +9,7 @@ import AppSidebar, {
   SidebarResizeHandle,
   useSidebarWidth,
 } from "@/components/AppSidebar";
+import PullToRefresh from "@/components/PullToRefresh";
 import SpaceQuickSwitcher from "@/components/SpaceQuickSwitcher";
 import { AppSidebarProvider } from "@/contexts/AppSidebarContext";
 import { GlobalMemoEditorProvider } from "@/contexts/GlobalMemoEditorContext";
@@ -116,6 +117,7 @@ const RootLayoutContent = () => {
         <Outlet />
       </main>
       <QuickFindDialog />
+      <PullToRefresh />
     </div>
   );
 };

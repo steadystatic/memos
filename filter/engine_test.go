@@ -109,6 +109,29 @@ func TestRenderSpaceFilters(t *testing.T) {
 	}
 }
 
+func TestRenderHandleFilter(t *testing.T) {
+	t.Parallel()
+
+	engine, err := NewEngine(NewSchema())
+	require.NoError(t, err)
+	for _, dialect := range []DialectName{DialectSQLite, DialectMySQL, DialectPostgres} {
+		statement, err := engine.CompileToStatement(context.Background(), `handle == "haymakr-12"`, RenderOptions{Dialect: dialect})
+		require.NoError(t, err, dialect)
+		require.Contains(t, statement.SQL, "space_seq", dialect)
+		require.Contains(t, statement.SQL, "handle_key", dialect)
+		require.Equal(t, []any{"haymakr-12"}, statement.Args, dialect)
+	}
+
+	_, err = engine.Compile(context.Background(), `handle != "haymakr-12"`)
+	require.ErrorContains(t, err, `operator != not allowed for field "handle"`, "NULL != value would silently drop unnumbered memos")
+
+	// Attachments have no handle of their own.
+	attachmentEngine, err := NewEngine(NewAttachmentSchema())
+	require.NoError(t, err)
+	_, err = attachmentEngine.Compile(context.Background(), `handle == "haymakr-12"`)
+	require.Error(t, err)
+}
+
 func TestRenderAttachmentCreatorFilter(t *testing.T) {
 	t.Parallel()
 

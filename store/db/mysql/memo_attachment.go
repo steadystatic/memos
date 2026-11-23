@@ -42,7 +42,7 @@ func (d *DB) ApplyMemoMutation(ctx context.Context, mutation *store.MemoMutation
 				return err
 			}
 		}
-		created, err := insertMySQLMemo(ctx, tx, create)
+		created, err := insertMySQLMemo(ctx, tx, create, mutation.CommentContextMemoID == nil)
 		if err != nil {
 			return err
 		}
@@ -186,8 +186,36 @@ func replaceMemoReferenceRelations(ctx context.Context, tx *sql.Tx, memoID int32
 	return nil
 }
 
+// nextMySQLMemoSpaceSeq numbers a memo being placed in a Space. It returns nil when the memo is
+// already there, so its number stays. The caller must hold a transaction, because the counter bump
+// and the memo write have to commit together.
+func nextMySQLMemoSpaceSeq(ctx context.Context, executor memoUpdateExecer, memoID, spaceID int32) (*int32, error) {
+	var current sql.NullInt32
+	if err := executor.QueryRowContext(ctx, "SELECT `space_id` FROM `memo` WHERE `id` = ?", memoID).Scan(&current); err != nil {
+		return nil, errors.Wrap(err, "failed to read memo space")
+	}
+	if current.Valid && current.Int32 == spaceID {
+		return nil, nil
+	}
+	return allocateMySQLSpaceSeq(ctx, executor, spaceID)
+}
+
+// allocateMySQLSpaceSeq takes the next number from a Space's counter, which the UPDATE holds a row lock
+// on until the transaction ends. Numbers are never reused.
+func allocateMySQLSpaceSeq(ctx context.Context, executor memoUpdateExecer, spaceID int32) (*int32, error) {
+	if _, err := executor.ExecContext(ctx, "UPDATE `space` SET `next_seq` = `next_seq` + 1 WHERE `id` = ?", spaceID); err != nil {
+		return nil, errors.Wrap(err, "failed to allocate memo space number")
+	}
+	var seq int32
+	if err := executor.QueryRowContext(ctx, "SELECT `next_seq` - 1 FROM `space` WHERE `id` = ?", spaceID).Scan(&seq); err != nil {
+		return nil, errors.Wrap(err, "failed to read allocated memo space number")
+	}
+	return &seq, nil
+}
+
 type memoUpdateExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 func applyMemoUpdate(ctx context.Context, executor memoUpdateExecer, update *store.UpdateMemo) error {
@@ -221,9 +249,17 @@ func applyMemoUpdate(ctx context.Context, executor memoUpdateExecer, update *sto
 		set, args = append(set, "`payload` = ?"), append(args, string(payload))
 	}
 	if update.ClearSpace {
-		set = append(set, "`space_id` = NULL")
+		set = append(set, "`space_id` = NULL", "`space_seq` = NULL")
 	} else if v := update.SpaceID; v != nil {
+		// A move renumbers the memo in its new Space; staying put keeps its number.
+		seq, err := nextMySQLMemoSpaceSeq(ctx, executor, update.ID, *v)
+		if err != nil {
+			return err
+		}
 		set, args = append(set, "`space_id` = ?"), append(args, *v)
+		if seq != nil {
+			set, args = append(set, "`space_seq` = ?"), append(args, *seq)
+		}
 	}
 	if len(set) == 0 {
 		return nil

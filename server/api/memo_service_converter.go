@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/usememos/memos/core/access"
+	"github.com/usememos/memos/internal/identifier"
 	apipb "github.com/usememos/memos/proto/gen/api"
 	storepb "github.com/usememos/memos/proto/gen/store"
 	"github.com/usememos/memos/store"
@@ -134,6 +135,10 @@ func (s *APIService) projectMemoCollaborationContext(ctx context.Context, memo *
 	}
 	spaceName := buildSpaceName(space.UID)
 	message.Space = &spaceName
+	// The handle names the Space by its key, so it is shown on the same terms as the placement.
+	if memo.SpaceSeq != nil && space.Key != "" {
+		message.Handle = identifier.FormatHandle(space.Key, *memo.SpaceSeq)
+	}
 	return nil
 }
 

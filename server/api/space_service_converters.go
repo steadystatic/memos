@@ -36,6 +36,7 @@ func convertSpaceMetadataFromStore(space *store.Space) *apipb.Space {
 		Name:        buildSpaceName(space.UID),
 		Title:       space.Title,
 		Description: space.Description,
+		Key:         space.Key,
 		Icon:        convertSpaceIconFromStore(space.Payload.GetIcon()),
 	}
 }

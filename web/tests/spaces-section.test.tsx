@@ -68,6 +68,7 @@ vi.mock("@/components/CreateSpaceDialog", () => ({
           onClick={() => {
             const createdSpace: Space = {
               $typeName: "memos.api.Space",
+              key: "",
               name: "spaces/created",
               title: "Created",
               description: "",
@@ -117,6 +118,7 @@ vi.mock("@/utils/i18n", () => ({
 
 const adminSpace: Space = {
   $typeName: "memos.api.Space",
+  key: "",
   name: "spaces/product",
   title: "Product",
   description: "Product decisions",
@@ -150,6 +152,7 @@ const receivedInvitation: SpaceInvitation = {
   role: 2,
   space: {
     $typeName: "memos.api.Space",
+    key: "",
     name: "spaces/research",
     title: "Research",
     description: "Research notes",

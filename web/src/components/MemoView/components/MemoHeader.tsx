@@ -18,6 +18,7 @@ import { MEMO_TIME_CONTROL_CLASSES } from "../constants";
 import { useMemoViewContext, useMemoViewDerived } from "../MemoViewContext";
 import { createMemoNavigationState, isMemoDetailPath } from "../navigation";
 import type { MemoHeaderProps } from "../types";
+import MemoHandle from "./MemoHandle";
 import MemoSpaceBadge from "./MemoSpaceBadge";
 
 /** The card's trailing actions are the package's 24px ghost squares (`sm`), whether or not they are package buttons. */
@@ -79,6 +80,7 @@ const MemoHeader: React.FC<MemoHeaderProps> = ({ timeDisplay = "relative", showC
             parentPage={parentPage}
             isCurrentPage={isMemoDetailPath(location.pathname, memo.name)}
           />
+          <MemoHandle handle={memo.handle} />
           {spaceMetadata}
         </div>
         {isNew && <NewBadge />}

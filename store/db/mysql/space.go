@@ -33,11 +33,14 @@ func (d *DB) CreateSpace(ctx context.Context, create *store.Space, creatorID int
 		}
 		payload = string(data)
 	}
-	fields := []string{"uid", "title", "description", "payload"}
-	values := []string{"?", "?", "?", "?"}
-	args := []any{create.UID, create.Title, create.Description, payload}
+	fields := []string{"uid", "title", "description", "payload", "handle_key"}
+	values := []string{"?", "?", "?", "?", "?"}
+	args := []any{create.UID, create.Title, create.Description, payload, create.Key}
 	result, err := tx.ExecContext(ctx, "INSERT INTO space ("+strings.Join(fields, ", ")+") VALUES ("+strings.Join(values, ", ")+")", args...)
 	if err != nil {
+		if isMySQLSpaceKeyViolation(err) {
+			return nil, store.ErrSpaceKeyTaken
+		}
 		if isMySQLUniqueViolation(err) {
 			return nil, store.ErrSpaceAlreadyExists
 		}
@@ -65,7 +68,7 @@ func (d *DB) CreateSpace(ctx context.Context, create *store.Space, creatorID int
 
 func (d *DB) ListSpaces(ctx context.Context, find *store.FindSpace) ([]*store.Space, error) {
 	where, args := []string{"1 = 1"}, []any{}
-	selectFields := "space.id, space.uid, space.title, space.description, space.payload"
+	selectFields := "space.id, space.uid, space.title, space.description, space.payload, space.handle_key"
 	joins := ""
 	groupBy := ""
 	if find.ID != nil {
@@ -90,7 +93,7 @@ func (d *DB) ListSpaces(ctx context.Context, find *store.FindSpace) ([]*store.Sp
 			JOIN user active_user ON active_user.id = active_member.user_id AND active_user.row_status = 'NORMAL'`
 		where = append(where, "viewer_member.user_id = ?", "viewer_member.status = 'ACTIVE'", "viewer_member.role IN ('ADMIN', 'USER')", "viewer_user.row_status = 'NORMAL'")
 		args = append(args, *find.MemberUserID)
-		groupBy = " GROUP BY space.id, space.uid, space.title, space.description, viewer_member.role"
+		groupBy = " GROUP BY space.id, space.uid, space.title, space.description, space.handle_key, viewer_member.role"
 	}
 	query := "SELECT " + selectFields + " FROM space" + joins + " WHERE " + strings.Join(where, " AND ") + groupBy + " ORDER BY space.id DESC"
 	query = appendMySQLLimit(query, find.Limit, find.Offset)
@@ -129,6 +132,9 @@ func (d *DB) UpdateSpace(ctx context.Context, update *store.UpdateSpace, actorUs
 	if update.Description != nil {
 		sets, args = append(sets, "description = ?"), append(args, *update.Description)
 	}
+	if update.Key != nil {
+		sets, args = append(sets, "handle_key = ?"), append(args, *update.Key)
+	}
 	if update.Payload != nil {
 		data, err := protojson.Marshal(update.Payload)
 		if err != nil {
@@ -138,6 +144,9 @@ func (d *DB) UpdateSpace(ctx context.Context, update *store.UpdateSpace, actorUs
 	}
 	args = append(args, update.ID)
 	if _, err := tx.ExecContext(ctx, "UPDATE space SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil {
+		if isMySQLSpaceKeyViolation(err) {
+			return nil, store.ErrSpaceKeyTaken
+		}
 		return nil, err
 	}
 	space, err := getMySQLSpace(ctx, tx, update.ID)
@@ -456,13 +465,15 @@ func scanMySQLSpace(row mysqlRowScanner, space *store.Space) error {
 
 func scanMySQLSpaceWithSummary(row mysqlRowScanner, space *store.Space, withSummary bool) error {
 	var payloadBytes []byte
-	targets := []any{&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes}
+	var key sql.NullString
+	targets := []any{&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes, &key}
 	if withSummary {
 		targets = append(targets, &space.CurrentUserRole, &space.MemberCount)
 	}
 	if err := row.Scan(targets...); err != nil {
 		return err
 	}
+	space.Key = key.String
 	space.Payload = &storepb.SpacePayload{}
 	return errors.Wrap(protojsonUnmarshaler.Unmarshal(payloadBytes, space.Payload), "failed to unmarshal space payload")
 }
@@ -485,7 +496,7 @@ func populateMySQLSpaceSummary(ctx context.Context, tx *sql.Tx, space *store.Spa
 
 func getMySQLSpace(ctx context.Context, tx *sql.Tx, id int32) (*store.Space, error) {
 	space := &store.Space{}
-	return space, scanMySQLSpace(tx.QueryRowContext(ctx, `SELECT id, uid, title, description, payload FROM space WHERE id = ?`, id), space)
+	return space, scanMySQLSpace(tx.QueryRowContext(ctx, `SELECT id, uid, title, description, payload, handle_key FROM space WHERE id = ?`, id), space)
 }
 
 func getMySQLSpaceMember(ctx context.Context, tx *sql.Tx, spaceID, userID int32) (*store.SpaceMember, error) {
@@ -584,6 +595,12 @@ func appendMySQLLimit(query string, limit, offset *int) string {
 		}
 	}
 	return query
+}
+
+// isMySQLSpaceKeyViolation reports a clash on the Space key's unique index, as opposed to its uid.
+func isMySQLSpaceKeyViolation(err error) bool {
+	var mysqlErr *mysqldriver.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 && strings.Contains(mysqlErr.Message, "idx_space_handle_key")
 }
 
 func isMySQLUniqueViolation(err error) bool {

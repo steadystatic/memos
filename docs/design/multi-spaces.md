@@ -223,3 +223,15 @@ Files for `PRIVATE`, `PROTECTED`, and `SPACE` memos use `private, no-store`; pub
 ## Deferred design
 
 Email and external-user invitations, invitation expiration, inviter attribution, invitation history, open enrollment, account erasure beyond the membership guard, notification retention policy and per-user notification preferences, collaborative editing by Space members, audit history, soft deletion, restoration, retryable external-object cleanup, delivery-time cancellation of queued email/webhooks, broader concurrent-mutation hardening, and asynchronous deletion of very large Spaces remain deferred. Later work must preserve invitee consent, independent memo authorization, non-propagating relations, and explicit Space aggregate deletion unless this design is revisited.
+
+## Amendments
+
+### 2026-11-23: Memo handles (fork)
+
+A memo placed in a Space has a short handle, `<space key>-<number>`, such as `haymakr-12`, so a person and an agent can name a note without a UUID or a permalink.
+
+- **Schema (26.11.2).** `space.handle_key` is the Space's short key: 1 to 16 lowercase letters, digits or hyphens, unique, and nullable only so that rows predating the column survive until the migration fills them. `space.next_seq` is a monotonic counter. `memo.space_seq` is the memo's number, unique with `space_id`. The migration derives each key from the Space UID when it is 16 characters or fewer, otherwise `s<space id>`, and numbers existing top-level memos by creation time.
+- **Numbering.** A top-level memo takes the next number when it is placed in a Space, whether created there or moved in, in the same transaction that bumps the counter. A number is never reused, so deleting or withdrawing a memo leaves a gap. Comments are not numbered. A memo that leaves a Space loses its number; one that moves to another Space is renumbered there, so an old handle stops resolving rather than naming a different note. Placing a memo in the Space it already has keeps its number.
+- **Key.** A new Space gets a key derived from its UID or title, with a numeric suffix on collision. A Space administrator can change it with the `key` update-mask path. Changing a key renames every handle in the Space, because the handle is derived and not stored.
+- **API.** `Space.key` is settable. `Memo.handle` is output only and follows the same visibility rule as the Space reference: only the author, active members and an instance administrator see it. The list filter accepts `handle == "haymakr-12"`, which is how an agent resolves a handle; memos with no handle never match. Keys are lowercase, so the filter takes the lowercase form.
+- **Alternatives.** Renaming the memo UID to the handle was rejected, because the UID is immutable and would go stale on a move. Storing the whole handle was rejected, because a key change would then rewrite every memo in the Space.

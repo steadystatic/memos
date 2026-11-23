@@ -36,8 +36,12 @@ CREATE TABLE space (
   uid TEXT NOT NULL UNIQUE,
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
-  payload JSONB NOT NULL DEFAULT '{}'
+  payload JSONB NOT NULL DEFAULT '{}',
+  handle_key TEXT,
+  next_seq INTEGER NOT NULL DEFAULT 1
 );
+
+CREATE UNIQUE INDEX idx_space_handle_key ON space(handle_key);
 
 -- space membership
 CREATE TABLE space_member (
@@ -62,9 +66,11 @@ CREATE TABLE memo (
   visibility TEXT NOT NULL DEFAULT 'PRIVATE',
   pinned BOOLEAN NOT NULL DEFAULT FALSE,
   payload JSONB NOT NULL DEFAULT '{}',
-  space_id INTEGER DEFAULT NULL
+  space_id INTEGER DEFAULT NULL,
+  space_seq INTEGER
 );
 
+CREATE UNIQUE INDEX idx_memo_space_seq ON memo(space_id, space_seq);
 CREATE INDEX idx_memo_space_id ON memo(space_id, row_status, created_ts DESC, id DESC);
 CREATE INDEX idx_memo_creator_id ON memo(creator_id);
 

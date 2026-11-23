@@ -206,6 +206,22 @@ func NewSchema() Schema {
 				CompareEq: true,
 			},
 		},
+		// handle is a memo's "<space key>-<number>" label, such as haymakr-12. It is derived, so a
+		// memo outside any Space, and a comment, has none and never matches.
+		"handle": {
+			Name:   "handle",
+			Kind:   FieldKindScalar,
+			Type:   FieldTypeString,
+			Column: Column{Table: "memo_space", Name: "handle_key"},
+			Expressions: map[DialectName]string{
+				DialectSQLite:   "CASE WHEN `memo`.`space_seq` IS NULL OR %[1]s IS NULL THEN NULL ELSE (%[1]s || '-' || `memo`.`space_seq`) END",
+				DialectMySQL:    "CASE WHEN `memo`.`space_seq` IS NULL OR %[1]s IS NULL THEN NULL ELSE CONCAT(%[1]s, '-', `memo`.`space_seq`) END",
+				DialectPostgres: "CASE WHEN memo.space_seq IS NULL OR %[1]s IS NULL THEN NULL ELSE (%[1]s || '-' || memo.space_seq) END",
+			},
+			AllowedComparisonOps: map[ComparisonOperator]bool{
+				CompareEq: true,
+			},
+		},
 		"tags": {
 			Name:     "tags",
 			Kind:     FieldKindJSONList,
@@ -327,6 +343,7 @@ func NewSchema() Schema {
 		cel.Variable("visibility", cel.StringType),
 		// Dyn permits the explicit null comparison used for memos without a space.
 		cel.Variable("space", cel.DynType),
+		cel.Variable("handle", cel.StringType),
 		cel.Variable("has_task_list", cel.BoolType),
 		cel.Variable("has_link", cel.BoolType),
 		cel.Variable("has_code", cel.BoolType),

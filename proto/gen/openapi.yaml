@@ -716,6 +716,9 @@ paths:
                        visibility (string: PRIVATE | PROTECTED | PUBLIC | SPACE),
                        space (string resource name, or null when the memo has no space;
                          supports == and comparisons against null, e.g. space != null),
+                       handle (string, a memo's "<space key>-<number>" label such as
+                         "haymakr-12"; lowercase, supports ==; memos outside a space and
+                         comments have none),
                        tags (list<string>; match with `"work" in tags`, not `tag == "work"`),
                        has_task_list / has_link / has_code / has_incomplete_tasks (bool),
                        has_location (bool; true when the memo has a location attached),
@@ -727,6 +730,7 @@ paths:
                      Examples:
                        pinned == true && visibility == "PUBLIC"
                        space == "spaces/team" or space == null
+                       handle == "haymakr-12"
                        tags.exists(t, t == "urgent")
                        content.contains("roadmap") && created_ts > now - duration("168h")
                   schema:
@@ -1563,7 +1567,7 @@ paths:
                     type: string
                 - name: updateMask
                   in: query
-                  description: 'Required. The fields to update. Supported paths: title, description, icon.'
+                  description: 'Required. The fields to update. Supported paths: title, description, icon, key.'
                   schema:
                     type: string
                     format: field-mask
@@ -4644,6 +4648,15 @@ components:
                         Optional. The last update time. Defaults to the current time when unset on
                          creation.
                     format: date-time
+                handle:
+                    readOnly: true
+                    type: string
+                    description: |-
+                        Output only. The memo's short, human-readable handle, "<space key>-<number>"
+                         such as "haymakr-12". It is empty for a memo outside any space and for a
+                         comment, and it changes when the memo moves to another space. Find a memo by
+                         handle with the list filter `handle == "haymakr-12"`. Shown only to the
+                         viewers who can see the memo's space.
             description: Memo is a Markdown note written by a user.
         MemoRelation:
             required:
@@ -5129,6 +5142,13 @@ components:
                         Output only. The number of accepted members in this space. Pending
                          invitations are excluded. Zero when this space is exposed as metadata only.
                     format: int32
+                key:
+                    type: string
+                    description: |-
+                        Optional. The short key that prefixes the handles of the space's memos, for
+                         example "haymakr" in the handle "haymakr-12". 1 to 16 lowercase letters,
+                         digits or hyphens, unique across spaces. On creation it is derived from
+                         the space ID or title when empty.
             description: Space is a collaboration boundary for placed memos.
         SpaceInvitation:
             required:

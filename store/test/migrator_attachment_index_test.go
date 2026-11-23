@@ -53,6 +53,8 @@ func TestMigrationAttachmentIndex(t *testing.T) {
 				_, err = ts.GetDriver().GetDB().ExecContext(ctx, "CREATE INDEX "+index+" ON attachment(creator_id)")
 				require.NoError(t, err)
 			}
+			// A 26.10.1 database predates the Space handle columns, so they go before 26.11/01 runs again.
+			dropSpaceHandleSchema(ctx, t, ts, driver)
 			setSchemaVersion(ctx, t, ts, "26.10.1")
 			err = ts.Migrate(ctx)
 			if state == "conflict" {
@@ -64,7 +66,7 @@ func TestMigrationAttachmentIndex(t *testing.T) {
 			}
 			setting, err := ts.GetUncachedInstanceSetting(ctx, &store.FindInstanceSetting{Name: "BASIC"})
 			require.NoError(t, err)
-			expected := "26.11.1"
+			expected := "26.11.2"
 			if state == "conflict" {
 				expected = "26.10.1"
 			}
@@ -98,6 +100,7 @@ func TestMigrationAttachmentLongType(t *testing.T) {
 			if upgrade {
 				_, err := ts.GetDriver().GetDB().ExecContext(ctx, "DROP INDEX "+attachmentLookupIndex("postgres"))
 				require.NoError(t, err)
+				dropSpaceHandleSchema(ctx, t, ts, "postgres")
 				setSchemaVersion(ctx, t, ts, "26.10.1")
 			}
 			attachment, err := ts.CreateAttachment(ctx, &store.Attachment{UID: "long-type", CreatorID: user.ID, Type: mime.String()})
@@ -108,5 +111,26 @@ func TestMigrationAttachmentLongType(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, mime.String(), stored.Type)
 		})
+	}
+}
+
+// dropSpaceHandleSchema removes what migration 26.11/01 adds, returning a latest-schema database to
+// the shape it had before that migration.
+func dropSpaceHandleSchema(ctx context.Context, t *testing.T, ts *store.Store, driver string) {
+	t.Helper()
+	statements := []string{
+		"DROP INDEX idx_space_handle_key",
+		"DROP INDEX idx_memo_space_seq",
+		"ALTER TABLE space DROP COLUMN handle_key",
+		"ALTER TABLE space DROP COLUMN next_seq",
+		"ALTER TABLE memo DROP COLUMN space_seq",
+	}
+	if driver == "mysql" {
+		statements[0] += " ON space"
+		statements[1] += " ON memo"
+	}
+	for _, statement := range statements {
+		_, err := ts.GetDriver().GetDB().ExecContext(ctx, statement)
+		require.NoError(t, err, statement)
 	}
 }

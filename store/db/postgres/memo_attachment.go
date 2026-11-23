@@ -42,7 +42,7 @@ func (d *DB) ApplyMemoMutation(ctx context.Context, mutation *store.MemoMutation
 				return err
 			}
 		}
-		if err := insertPostgresMemo(ctx, tx, create); err != nil {
+		if err := insertPostgresMemo(ctx, tx, create, mutation.CommentContextMemoID == nil); err != nil {
 			return err
 		}
 		mutation.MemoID = create.ID
@@ -187,6 +187,32 @@ func replaceMemoReferenceRelations(ctx context.Context, tx *sql.Tx, memoID int32
 
 type memoUpdateExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// nextPostgresMemoSpaceSeq numbers a memo being placed in a Space. It returns nil when the memo is
+// already there, so its number stays. The caller must hold a transaction, because the counter bump
+// and the memo write have to commit together.
+func nextPostgresMemoSpaceSeq(ctx context.Context, executor memoUpdateExecer, memoID, spaceID int32) (*int32, error) {
+	var current sql.NullInt32
+	if err := executor.QueryRowContext(ctx, "SELECT space_id FROM memo WHERE id = $1", memoID).Scan(&current); err != nil {
+		return nil, errors.Wrap(err, "failed to read memo space")
+	}
+	if current.Valid && current.Int32 == spaceID {
+		return nil, nil
+	}
+	return allocatePostgresSpaceSeq(ctx, executor, spaceID)
+}
+
+// allocatePostgresSpaceSeq takes the next number from a Space's counter. Numbers are never reused.
+func allocatePostgresSpaceSeq(ctx context.Context, executor interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, spaceID int32) (*int32, error) {
+	var seq int32
+	if err := executor.QueryRowContext(ctx, "UPDATE space SET next_seq = next_seq + 1 WHERE id = $1 RETURNING next_seq - 1", spaceID).Scan(&seq); err != nil {
+		return nil, errors.Wrap(err, "failed to allocate memo space number")
+	}
+	return &seq, nil
 }
 
 func applyMemoUpdate(ctx context.Context, executor memoUpdateExecer, update *store.UpdateMemo) error {
@@ -224,9 +250,17 @@ func applyMemoUpdate(ctx context.Context, executor memoUpdateExecer, update *sto
 		appendValue("payload", string(payload))
 	}
 	if update.ClearSpace {
-		set = append(set, "space_id = NULL")
+		set = append(set, "space_id = NULL", "space_seq = NULL")
 	} else if v := update.SpaceID; v != nil {
+		// A move renumbers the memo in its new Space; staying put keeps its number.
+		seq, err := nextPostgresMemoSpaceSeq(ctx, executor, update.ID, *v)
+		if err != nil {
+			return err
+		}
 		appendValue("space_id", *v)
+		if seq != nil {
+			appendValue("space_seq", *seq)
+		}
 	}
 	if len(set) == 0 {
 		return nil

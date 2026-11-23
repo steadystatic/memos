@@ -61,6 +61,7 @@ vi.mock("@/utils/i18n", () => ({
 
 const productSpace: Space = {
   $typeName: "memos.api.Space",
+  key: "",
   name: "spaces/product",
   title: "Product",
   description: "Product decisions",

@@ -177,6 +177,12 @@ message Space {
   // invitations are excluded. Zero when this space is exposed as metadata only.
   int32 member_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 
+  // Optional. The short key that prefixes the handles of the space's memos, for
+  // example "haymakr" in the handle "haymakr-12". 1 to 16 lowercase letters,
+  // digits or hyphens, unique across spaces. On creation it is derived from
+  // the space ID or title when empty.
+  string key = 7 [(google.api.field_behavior) = OPTIONAL];
+
   // Icon is the display icon of a space.
   message Icon {
     // The icon value.
@@ -235,7 +241,7 @@ message UpdateSpaceRequest {
   // update.
   Space space = 1 [(google.api.field_behavior) = REQUIRED];
 
-  // Required. The fields to update. Supported paths: title, description, icon.
+  // Required. The fields to update. Supported paths: title, description, icon, key.
   google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = REQUIRED];
 }
 

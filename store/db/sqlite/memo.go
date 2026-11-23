@@ -22,7 +22,7 @@ func (d *DB) CreateMemo(ctx context.Context, create *store.Memo) (*store.Memo, e
 	if err := validateSQLiteMemoCreate(ctx, tx, create); err != nil {
 		return nil, err
 	}
-	if err := insertSQLiteMemo(ctx, tx, create); err != nil {
+	if err := insertSQLiteMemo(ctx, tx, create, true); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -31,9 +31,19 @@ func (d *DB) CreateMemo(ctx context.Context, create *store.Memo) (*store.Memo, e
 	return create, nil
 }
 
-func insertSQLiteMemo(ctx context.Context, tx dbExecutor, create *store.Memo) error {
+// insertSQLiteMemo inserts a memo. A numbered memo placed in a Space takes the next number from the
+// Space's counter; comments are not numbered.
+func insertSQLiteMemo(ctx context.Context, tx dbExecutor, create *store.Memo, numbered bool) error {
 	fields := []string{"`uid`", "`creator_id`", "`content`", "`visibility`", "`payload`", "`space_id`"}
 	placeholder := []string{"?", "?", "?", "?", "?", "?"}
+	if create.SpaceID != nil && numbered {
+		seq, err := allocateSQLiteSpaceSeq(ctx, tx, *create.SpaceID)
+		if err != nil {
+			return err
+		}
+		create.SpaceSeq = seq
+		fields, placeholder = append(fields, "`space_seq`"), append(placeholder, "?")
+	}
 	payload := "{}"
 	if create.Payload != nil {
 		payloadBytes, err := protojson.Marshal(create.Payload)
@@ -43,6 +53,9 @@ func insertSQLiteMemo(ctx context.Context, tx dbExecutor, create *store.Memo) er
 		payload = string(payloadBytes)
 	}
 	args := []any{create.UID, create.CreatorID, create.Content, create.Visibility, payload, create.SpaceID}
+	if create.SpaceSeq != nil {
+		args = append(args, *create.SpaceSeq)
+	}
 
 	// Add custom timestamps if provided
 	if create.CreatedTs != 0 {
@@ -209,6 +222,8 @@ func (d *DB) ListMemos(ctx context.Context, find *store.FindMemo) ([]*store.Memo
 		"`memo`.`pinned` AS `pinned`",
 		"`memo`.`payload` AS `payload`",
 		"`memo`.`space_id` AS `space_id`",
+		"`memo`.`space_seq` AS `space_seq`",
+		"COALESCE(`memo_space`.`handle_key`, '') AS `space_key`",
 		`(SELECT parent_memo.uid
 			FROM memo_relation AS parent_relation
 			JOIN memo AS parent_memo ON parent_memo.id = parent_relation.related_memo_id
@@ -252,6 +267,8 @@ func (d *DB) ListMemos(ctx context.Context, find *store.FindMemo) ([]*store.Memo
 			&memo.Pinned,
 			&payloadBytes,
 			&memo.SpaceID,
+			&memo.SpaceSeq,
+			&memo.SpaceKey,
 			&memo.ParentUID,
 		}
 		if !find.ExcludeContent {
@@ -287,7 +304,8 @@ func (d *DB) CountUserMemos(ctx context.Context, creatorID int32) (int64, error)
 }
 
 func (d *DB) UpdateMemo(ctx context.Context, update *store.UpdateMemo) error {
-	if update.Policy == nil {
+	// A change of Space bumps the Space's counter, which has to commit with the memo.
+	if update.Policy == nil && update.SpaceID == nil && !update.ClearSpace {
 		return applyMemoUpdate(ctx, d.db, update)
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
@@ -295,8 +313,10 @@ func (d *DB) UpdateMemo(ctx context.Context, update *store.UpdateMemo) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := validateSQLiteMemoWritePolicy(ctx, tx, update.ID, update.Policy, update); err != nil {
-		return err
+	if update.Policy != nil {
+		if _, err := validateSQLiteMemoWritePolicy(ctx, tx, update.ID, update.Policy, update); err != nil {
+			return err
+		}
 	}
 	if err := applyMemoUpdate(ctx, tx, update); err != nil {
 		return err

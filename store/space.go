@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/usememos/memos/internal/identifier"
@@ -21,6 +22,12 @@ var ErrSpaceMemberNotActive = errors.New("space member user is not active")
 
 // ErrSpaceAlreadyExists indicates a duplicate immutable space ID.
 var ErrSpaceAlreadyExists = errors.New("space already exists")
+
+// ErrSpaceKeyTaken indicates that another space already uses the short key.
+var ErrSpaceKeyTaken = errors.New("space key already in use")
+
+// ErrInvalidSpaceKey indicates a short key that is not 1 to 16 lowercase letters, digits or hyphens.
+var ErrInvalidSpaceKey = errors.New("invalid space key")
 
 // ErrSpaceMemberAlreadyExists indicates an existing membership or invitation.
 var ErrSpaceMemberAlreadyExists = errors.New("space member already exists")
@@ -69,9 +76,11 @@ func (r SpaceMemberRole) IsActiveMember() bool {
 type Space struct {
 	ID int32
 
-	UID             string
-	Title           string
-	Description     string
+	UID         string
+	Title       string
+	Description string
+	// Key is the short prefix of the handles of the space's memos, such as "haymakr" in "haymakr-12".
+	Key             string
 	Payload         *storepb.SpacePayload
 	CurrentUserRole SpaceMemberRole
 	MemberCount     int32
@@ -94,6 +103,7 @@ type UpdateSpace struct {
 	ID          int32
 	Title       *string
 	Description *string
+	Key         *string
 	Payload     *storepb.SpacePayload
 }
 
@@ -187,7 +197,33 @@ func (s *Store) CreateSpace(ctx context.Context, create *Space, creatorID int32)
 	if err := ValidateSpaceIcon(create.Payload.GetIcon()); err != nil {
 		return nil, err
 	}
-	return s.driver.CreateSpace(ctx, create, creatorID)
+	// An explicit key is the caller's to get right; a derived one yields to an existing key with a numeric suffix.
+	explicitKey := create.Key != ""
+	if explicitKey {
+		create.Key = strings.ToLower(create.Key)
+		if !identifier.SpaceKeyMatcher.MatchString(create.Key) {
+			return nil, ErrInvalidSpaceKey
+		}
+	} else {
+		create.Key = identifier.DeriveSpaceKey(create.UID, create.Title)
+	}
+	base := create.Key
+	for attempt := 2; ; attempt++ {
+		space, err := s.driver.CreateSpace(ctx, create, creatorID)
+		if !errors.Is(err, ErrSpaceKeyTaken) || explicitKey || attempt > 50 {
+			return space, err
+		}
+		create.Key = suffixedSpaceKey(base, attempt)
+	}
+}
+
+// suffixedSpaceKey appends "-n" to base, shortening base so the key stays within the length limit.
+func suffixedSpaceKey(base string, n int) string {
+	suffix := "-" + strconv.Itoa(n)
+	if room := identifier.MaxSpaceKeyLength - len(suffix); len(base) > room {
+		base = strings.TrimRight(base[:room], "-")
+	}
+	return base + suffix
 }
 
 // ListSpaces returns spaces matching find.
@@ -218,7 +254,14 @@ func (s *Store) UpdateSpace(ctx context.Context, update *UpdateSpace, actorUserI
 	if err := ValidateSpaceIcon(update.Payload.GetIcon()); err != nil {
 		return nil, err
 	}
-	if update.Title == nil && update.Description == nil && update.Payload == nil {
+	if update.Key != nil {
+		key := strings.ToLower(*update.Key)
+		if !identifier.SpaceKeyMatcher.MatchString(key) {
+			return nil, ErrInvalidSpaceKey
+		}
+		update.Key = &key
+	}
+	if update.Title == nil && update.Description == nil && update.Key == nil && update.Payload == nil {
 		return nil, errors.New("space update requires at least one field")
 	}
 	return s.driver.UpdateSpace(ctx, update, actorUserID)

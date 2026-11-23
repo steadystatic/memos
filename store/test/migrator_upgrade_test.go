@@ -89,8 +89,8 @@ func requireUpgradePreservesData(ctx context.Context, t *testing.T, previous *st
 		UID: "upgrade-sentinel", CreatorID: user.ID, Content: "#upgrade\n- [ ] preserved task", Visibility: store.Private, Pinned: true,
 	})
 	require.NoError(t, err)
-	memo, err = previous.GetMemo(ctx, &store.FindMemo{UID: &memo.UID})
-	require.NoError(t, err)
+	// The seed is written with the current store against the old schema, so it is not read back
+	// here: reads select columns that a later migration adds. The persisted fields are compared below.
 	view, err := previous.UpsertUserSetting(ctx, &storepb.UserSetting{
 		UserId: user.ID, Key: storepb.UserSetting_MEMO_VIEWS,
 		Value: &storepb.UserSetting_MemoViews{MemoViews: &storepb.MemoViewsUserSetting{
@@ -119,7 +119,14 @@ func requireUpgradePreservesData(ctx context.Context, t *testing.T, previous *st
 		require.Equal(t, user, preservedUser)
 		preservedMemo, err := candidate.GetMemo(ctx, &store.FindMemo{UID: &memo.UID})
 		require.NoError(t, err)
-		require.Equal(t, memo, preservedMemo)
+		require.Equal(t, memo.ID, preservedMemo.ID)
+		require.Equal(t, memo.CreatorID, preservedMemo.CreatorID)
+		require.Equal(t, memo.Content, preservedMemo.Content)
+		require.Equal(t, memo.Visibility, preservedMemo.Visibility)
+		require.Equal(t, memo.CreatedTs, preservedMemo.CreatedTs)
+		require.Equal(t, memo.UpdatedTs, preservedMemo.UpdatedTs)
+		require.Equal(t, memo.RowStatus, preservedMemo.RowStatus)
+		require.Nil(t, preservedMemo.SpaceSeq, "a memo outside any Space has no number")
 		preservedView, err := candidate.GetUserSetting(ctx, &store.FindUserSetting{UserID: &user.ID, Key: storepb.UserSetting_MEMO_VIEWS})
 		require.NoError(t, err)
 		require.True(t, proto.Equal(view, preservedView), "saved Views must survive the upgrade")

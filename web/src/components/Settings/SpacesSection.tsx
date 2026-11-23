@@ -36,6 +36,9 @@ import { type Space, type SpaceInvitation, type SpaceMember, SpaceMember_Role } 
 import type { User } from "@/types/proto/api/user_service_pb";
 import { useTranslate } from "@/utils/i18n";
 
+/** A Space's short key: 1–16 lowercase letters, digits or hyphens, not starting or ending with a hyphen. */
+const SPACE_KEY_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,14}[a-z0-9])?$/;
+
 type DetailTab = "general" | "members";
 
 const getSpacesSettingsLocation = (spaceName?: string) => ({
@@ -351,6 +354,7 @@ const SpaceDetail = ({ space, viewerName, onBack }: SpaceDetailProps) => {
   const [title, setTitle] = useState(space.title);
   const [description, setDescription] = useState(space.description);
   const [icon, setIcon] = useState(space.icon);
+  const [key, setKey] = useState(space.key);
   const [inviteOpen, setInviteOpen] = useState(false);
   const inviteButtonRef = useRef<HTMLElement>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
@@ -371,7 +375,9 @@ const SpaceDetail = ({ space, viewerName, onBack }: SpaceDetailProps) => {
     { value: String(SpaceMember_Role.ADMIN), label: t("setting.spaces.space-admin") },
   ];
   const iconChanged = !customIconsEqual(icon, space.icon);
-  const detailsChanged = title.trim() !== space.title || description.trim() !== space.description || iconChanged;
+  const keyChanged = key !== space.key;
+  const keyValid = SPACE_KEY_PATTERN.test(key);
+  const detailsChanged = title.trim() !== space.title || description.trim() !== space.description || iconChanged || keyChanged;
   const spaceUid = extractSpaceUidFromName(space.name);
   const disambiguatedSpaceTitle = `${space.title} (${spaceUid})`;
 
@@ -379,15 +385,22 @@ const SpaceDetail = ({ space, viewerName, onBack }: SpaceDetailProps) => {
     setTitle(space.title);
     setDescription(space.description);
     setIcon(space.icon);
-  }, [space.description, space.title, space.icon]);
+    setKey(space.key);
+  }, [space.description, space.title, space.icon, space.key]);
 
   const handleSave = async () => {
     const trimmedTitle = title.trim();
-    if (!trimmedTitle || !isAdmin || updateSpace.isPending) return;
+    if (!trimmedTitle || !isAdmin || updateSpace.isPending || (keyChanged && !keyValid)) return;
     try {
       await updateSpace.mutateAsync({
-        space: { name: space.name, title: trimmedTitle, description: description.trim(), ...(iconChanged ? { icon } : {}) },
-        updateMask: ["title", "description", ...(iconChanged ? ["icon"] : [])],
+        space: {
+          name: space.name,
+          title: trimmedTitle,
+          description: description.trim(),
+          ...(iconChanged ? { icon } : {}),
+          ...(keyChanged ? { key } : {}),
+        },
+        updateMask: ["title", "description", ...(iconChanged ? ["icon"] : []), ...(keyChanged ? ["key"] : [])],
       });
       toast.add({ title: t("setting.spaces.save-success"), type: "success" });
     } catch (error) {
@@ -520,6 +533,33 @@ const SpaceDetail = ({ space, viewerName, onBack }: SpaceDetailProps) => {
                 </div>
               </List.Item>
               <List.Item>
+                <Field.Root className="grid gap-2 sm:grid-cols-[170px_1fr] sm:items-start" invalid={keyChanged && !keyValid}>
+                  <div>
+                    <Field.Label>{t("setting.spaces.key-label")}</Field.Label>
+                    <Field.Description className="mt-1">
+                      {t("setting.spaces.key-help", { example: `${key || "key"}-12` })}
+                    </Field.Description>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Input
+                      id="space-settings-key"
+                      value={key}
+                      onChange={(event) => setKey(event.target.value.toLowerCase())}
+                      readOnly={!isAdmin}
+                      maxLength={16}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="font-mono"
+                    />
+                    {keyChanged && !keyValid && (
+                      <Field.Error match role="alert">
+                        {t("setting.spaces.key-invalid")}
+                      </Field.Error>
+                    )}
+                  </div>
+                </Field.Root>
+              </List.Item>
+              <List.Item>
                 <Field.Root className="grid gap-2 sm:grid-cols-[170px_1fr] sm:items-start">
                   <div>
                     <Field.Label>{t("common.description")}</Field.Label>
@@ -539,7 +579,7 @@ const SpaceDetail = ({ space, viewerName, onBack }: SpaceDetailProps) => {
               <div className="flex justify-end">
                 <Button
                   variant="primary"
-                  disabled={!title.trim() || !detailsChanged || updateSpace.isPending}
+                  disabled={!title.trim() || !detailsChanged || updateSpace.isPending || (keyChanged && !keyValid)}
                   onClick={() => void handleSave()}
                 >
                   {t("setting.spaces.save-changes")}

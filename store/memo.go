@@ -64,9 +64,14 @@ type Memo struct {
 	Pinned     bool
 	Payload    *storepb.MemoPayload
 	SpaceID    *int32
+	// SpaceSeq is the memo's number within its Space, assigned when it is placed there.
+	// It is nil for a memo outside any Space and for comments.
+	SpaceSeq *int32
 
 	// Composed fields
 	ParentUID *string
+	// SpaceKey is the short key of the memo's Space, so the handle "<SpaceKey>-<SpaceSeq>" can be shown.
+	SpaceKey string
 }
 
 type FindMemo struct {

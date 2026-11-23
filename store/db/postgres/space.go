@@ -33,17 +33,22 @@ func (d *DB) CreateSpace(ctx context.Context, create *store.Space, creatorID int
 		}
 		payload = string(data)
 	}
-	fields := []string{"uid", "title", "description", "payload"}
-	args := []any{create.UID, create.Title, create.Description, payload}
+	fields := []string{"uid", "title", "description", "payload", "handle_key"}
+	args := []any{create.UID, create.Title, create.Description, payload, create.Key}
 	space := &store.Space{}
 	var payloadBytes []byte
-	query := "INSERT INTO space (" + strings.Join(fields, ", ") + ") VALUES (" + placeholders(len(args)) + ") RETURNING id, uid, title, description, payload"
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes); err != nil {
+	var key sql.NullString
+	query := "INSERT INTO space (" + strings.Join(fields, ", ") + ") VALUES (" + placeholders(len(args)) + ") RETURNING id, uid, title, description, payload, handle_key"
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes, &key); err != nil {
+		if isPostgresSpaceKeyViolation(err) {
+			return nil, store.ErrSpaceKeyTaken
+		}
 		if isPostgresUniqueViolation(err) {
 			return nil, store.ErrSpaceAlreadyExists
 		}
 		return nil, err
 	}
+	space.Key = key.String
 	space.Payload = &storepb.SpacePayload{}
 	if err := protojsonUnmarshaler.Unmarshal(payloadBytes, space.Payload); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal space payload")
@@ -61,7 +66,7 @@ func (d *DB) CreateSpace(ctx context.Context, create *store.Space, creatorID int
 
 func (d *DB) ListSpaces(ctx context.Context, find *store.FindSpace) ([]*store.Space, error) {
 	where, args := []string{"1 = 1"}, []any{}
-	selectFields := "space.id, space.uid, space.title, space.description, space.payload"
+	selectFields := "space.id, space.uid, space.title, space.description, space.payload, space.handle_key"
 	joins := ""
 	groupBy := ""
 	add := func(condition string, value any) {
@@ -90,7 +95,7 @@ func (d *DB) ListSpaces(ctx context.Context, find *store.FindSpace) ([]*store.Sp
 			JOIN "user" active_user ON active_user.id = active_member.user_id AND active_user.row_status = 'NORMAL'`
 		add("viewer_member.user_id = %s", *find.MemberUserID)
 		where = append(where, "viewer_member.status = 'ACTIVE'", "viewer_member.role IN ('ADMIN', 'USER')", "viewer_user.row_status = 'NORMAL'")
-		groupBy = " GROUP BY space.id, space.uid, space.title, space.description, space.payload, viewer_member.role"
+		groupBy = " GROUP BY space.id, space.uid, space.title, space.description, space.payload, space.handle_key, viewer_member.role"
 	}
 	query := "SELECT " + selectFields + " FROM space" + joins + " WHERE " + strings.Join(where, " AND ") + groupBy + " ORDER BY space.id DESC"
 	query = appendPostgresLimit(query, find.Limit, find.Offset)
@@ -103,13 +108,15 @@ func (d *DB) ListSpaces(ctx context.Context, find *store.FindSpace) ([]*store.Sp
 	for rows.Next() {
 		space := &store.Space{}
 		var payloadBytes []byte
-		scanTargets := []any{&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes}
+		var key sql.NullString
+		scanTargets := []any{&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes, &key}
 		if find.MemberUserID != nil {
 			scanTargets = append(scanTargets, &space.CurrentUserRole, &space.MemberCount)
 		}
 		if err := rows.Scan(scanTargets...); err != nil {
 			return nil, err
 		}
+		space.Key = key.String
 		space.Payload = &storepb.SpacePayload{}
 		if err := protojsonUnmarshaler.Unmarshal(payloadBytes, space.Payload); err != nil {
 			return nil, errors.Wrap(err, "failed to unmarshal space payload")
@@ -142,6 +149,9 @@ func (d *DB) UpdateSpace(ctx context.Context, update *store.UpdateSpace, actorUs
 	if update.Description != nil {
 		add("description", *update.Description)
 	}
+	if update.Key != nil {
+		add("handle_key", *update.Key)
+	}
 	if update.Payload != nil {
 		data, err := protojson.Marshal(update.Payload)
 		if err != nil {
@@ -152,10 +162,15 @@ func (d *DB) UpdateSpace(ctx context.Context, update *store.UpdateSpace, actorUs
 	args = append(args, update.ID)
 	space := &store.Space{}
 	var payloadBytes []byte
-	query := "UPDATE space SET " + strings.Join(sets, ", ") + " WHERE id = " + placeholder(len(args)) + " RETURNING id, uid, title, description, payload"
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes); err != nil {
+	var key sql.NullString
+	query := "UPDATE space SET " + strings.Join(sets, ", ") + " WHERE id = " + placeholder(len(args)) + " RETURNING id, uid, title, description, payload, handle_key"
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes, &key); err != nil {
+		if isPostgresSpaceKeyViolation(err) {
+			return nil, store.ErrSpaceKeyTaken
+		}
 		return nil, err
 	}
+	space.Key = key.String
 	space.Payload = &storepb.SpacePayload{}
 	if err := protojsonUnmarshaler.Unmarshal(payloadBytes, space.Payload); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal space payload")
@@ -576,6 +591,12 @@ func appendPostgresLimit(query string, limit, offset *int) string {
 		}
 	}
 	return query
+}
+
+// isPostgresSpaceKeyViolation reports a clash on the Space key's unique index, as opposed to its uid.
+func isPostgresSpaceKeyViolation(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "idx_space_handle_key"
 }
 
 func isPostgresUniqueViolation(err error) bool {

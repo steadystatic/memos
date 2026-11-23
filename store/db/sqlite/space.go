@@ -33,18 +33,23 @@ func (d *DB) CreateSpace(ctx context.Context, create *store.Space, creatorID int
 		}
 		payload = string(data)
 	}
-	fields := []string{"uid", "title", "description", "payload"}
-	values := []string{"?", "?", "?", "?"}
-	args := []any{create.UID, create.Title, create.Description, payload}
-	query := "INSERT INTO space (" + strings.Join(fields, ", ") + ") VALUES (" + strings.Join(values, ", ") + ") RETURNING id, uid, title, description, payload"
+	fields := []string{"uid", "title", "description", "payload", "handle_key"}
+	values := []string{"?", "?", "?", "?", "?"}
+	args := []any{create.UID, create.Title, create.Description, payload, create.Key}
+	query := "INSERT INTO space (" + strings.Join(fields, ", ") + ") VALUES (" + strings.Join(values, ", ") + ") RETURNING id, uid, title, description, payload, handle_key"
 	space := &store.Space{}
 	var payloadBytes []byte
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes); err != nil {
+	var key sql.NullString
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes, &key); err != nil {
 		if isSQLiteUniqueViolation(err) {
+			if strings.Contains(err.Error(), "handle_key") {
+				return nil, store.ErrSpaceKeyTaken
+			}
 			return nil, store.ErrSpaceAlreadyExists
 		}
 		return nil, errors.Wrap(err, "failed to create space")
 	}
+	space.Key = key.String
 	space.Payload = &storepb.SpacePayload{}
 	if err := protojsonUnmarshaler.Unmarshal(payloadBytes, space.Payload); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal space payload")
@@ -62,7 +67,7 @@ func (d *DB) CreateSpace(ctx context.Context, create *store.Space, creatorID int
 
 func (d *DB) ListSpaces(ctx context.Context, find *store.FindSpace) ([]*store.Space, error) {
 	where, args := []string{"1 = 1"}, []any{}
-	selectFields := "space.id, space.uid, space.title, space.description, space.payload"
+	selectFields := "space.id, space.uid, space.title, space.description, space.payload, space.handle_key"
 	joins := ""
 	groupBy := ""
 	if find.ID != nil {
@@ -87,7 +92,7 @@ func (d *DB) ListSpaces(ctx context.Context, find *store.FindSpace) ([]*store.Sp
 			JOIN user active_user ON active_user.id = active_member.user_id AND active_user.row_status = 'NORMAL'`
 		where = append(where, "viewer_member.user_id = ?", "viewer_member.status = 'ACTIVE'", "viewer_member.role IN ('ADMIN', 'USER')", "viewer_user.row_status = 'NORMAL'")
 		args = append(args, *find.MemberUserID)
-		groupBy = " GROUP BY space.id, space.uid, space.title, space.description, space.payload, viewer_member.role"
+		groupBy = " GROUP BY space.id, space.uid, space.title, space.description, space.payload, space.handle_key, viewer_member.role"
 	}
 	query := "SELECT " + selectFields + " FROM space" + joins + " WHERE " + strings.Join(where, " AND ") + groupBy + " ORDER BY space.id DESC"
 	query = appendSQLiteLimit(query, find.Limit, find.Offset)
@@ -100,13 +105,15 @@ func (d *DB) ListSpaces(ctx context.Context, find *store.FindSpace) ([]*store.Sp
 	for rows.Next() {
 		space := &store.Space{}
 		var payloadBytes []byte
-		scanTargets := []any{&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes}
+		var key sql.NullString
+		scanTargets := []any{&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes, &key}
 		if find.MemberUserID != nil {
 			scanTargets = append(scanTargets, &space.CurrentUserRole, &space.MemberCount)
 		}
 		if err := rows.Scan(scanTargets...); err != nil {
 			return nil, err
 		}
+		space.Key = key.String
 		space.Payload = &storepb.SpacePayload{}
 		if err := protojsonUnmarshaler.Unmarshal(payloadBytes, space.Payload); err != nil {
 			return nil, errors.Wrap(err, "failed to unmarshal space payload")
@@ -132,6 +139,9 @@ func (d *DB) UpdateSpace(ctx context.Context, update *store.UpdateSpace, actorUs
 	if update.Description != nil {
 		sets, args = append(sets, "description = ?"), append(args, *update.Description)
 	}
+	if update.Key != nil {
+		sets, args = append(sets, "handle_key = ?"), append(args, *update.Key)
+	}
 	if update.Payload != nil {
 		data, err := protojson.Marshal(update.Payload)
 		if err != nil {
@@ -141,12 +151,17 @@ func (d *DB) UpdateSpace(ctx context.Context, update *store.UpdateSpace, actorUs
 	}
 	args = append(args, update.ID)
 	query := `UPDATE space SET ` + strings.Join(sets, ", ") + ` WHERE id = ?
-		RETURNING id, uid, title, description, payload`
+		RETURNING id, uid, title, description, payload, handle_key`
 	space := &store.Space{}
 	var payloadBytes []byte
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes); err != nil {
+	var key sql.NullString
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&space.ID, &space.UID, &space.Title, &space.Description, &payloadBytes, &key); err != nil {
+		if isSQLiteUniqueViolation(err) && strings.Contains(err.Error(), "handle_key") {
+			return nil, store.ErrSpaceKeyTaken
+		}
 		return nil, err
 	}
+	space.Key = key.String
 	space.Payload = &storepb.SpacePayload{}
 	if err := protojsonUnmarshaler.Unmarshal(payloadBytes, space.Payload); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal space payload")

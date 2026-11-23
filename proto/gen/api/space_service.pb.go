@@ -94,7 +94,12 @@ type Space struct {
 	CurrentUserRole SpaceMember_Role `protobuf:"varint,5,opt,name=current_user_role,json=currentUserRole,proto3,enum=memos.api.SpaceMember_Role" json:"current_user_role,omitempty"`
 	// Output only. The number of accepted members in this space. Pending
 	// invitations are excluded. Zero when this space is exposed as metadata only.
-	MemberCount   int32 `protobuf:"varint,6,opt,name=member_count,json=memberCount,proto3" json:"member_count,omitempty"`
+	MemberCount int32 `protobuf:"varint,6,opt,name=member_count,json=memberCount,proto3" json:"member_count,omitempty"`
+	// Optional. The short key that prefixes the handles of the space's memos, for
+	// example "haymakr" in the handle "haymakr-12". 1 to 16 lowercase letters,
+	// digits or hyphens, unique across spaces. On creation it is derived from
+	// the space ID or title when empty.
+	Key           string `protobuf:"bytes,7,opt,name=key,proto3" json:"key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -169,6 +174,13 @@ func (x *Space) GetMemberCount() int32 {
 		return x.MemberCount
 	}
 	return 0
+}
+
+func (x *Space) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
 }
 
 // Request message for SpaceService.ListSpaces.
@@ -391,7 +403,7 @@ type UpdateSpaceRequest struct {
 	// Required. The space with updated values. Its name identifies the space to
 	// update.
 	Space *Space `protobuf:"bytes,1,opt,name=space,proto3" json:"space,omitempty"`
-	// Required. The fields to update. Supported paths: title, description, icon.
+	// Required. The fields to update. Supported paths: title, description, icon, key.
 	UpdateMask    *fieldmaskpb.FieldMask `protobuf:"bytes,2,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1480,14 +1492,15 @@ var File_api_space_service_proto protoreflect.FileDescriptor
 
 const file_api_space_service_proto_rawDesc = "" +
 	"\n" +
-	"\x17api/space_service.proto\x12\tmemos.api\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a google/protobuf/field_mask.proto\"\x80\x03\n" +
+	"\x17api/space_service.proto\x12\tmemos.api\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a google/protobuf/field_mask.proto\"\x97\x03\n" +
 	"\x05Space\x12\x17\n" +
 	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12\x19\n" +
 	"\x05title\x18\x02 \x01(\tB\x03\xe0A\x02R\x05title\x12%\n" +
 	"\vdescription\x18\x03 \x01(\tB\x03\xe0A\x01R\vdescription\x12.\n" +
 	"\x04icon\x18\x04 \x01(\v2\x15.memos.api.Space.IconB\x03\xe0A\x01R\x04icon\x12L\n" +
 	"\x11current_user_role\x18\x05 \x01(\x0e2\x1b.memos.api.SpaceMember.RoleB\x03\xe0A\x03R\x0fcurrentUserRole\x12&\n" +
-	"\fmember_count\x18\x06 \x01(\x05B\x03\xe0A\x03R\vmemberCount\x1aA\n" +
+	"\fmember_count\x18\x06 \x01(\x05B\x03\xe0A\x03R\vmemberCount\x12\x15\n" +
+	"\x03key\x18\a \x01(\tB\x03\xe0A\x01R\x03key\x1aA\n" +
 	"\x04Icon\x12\x16\n" +
 	"\x05emoji\x18\x01 \x01(\tH\x00R\x05emoji\x12\x18\n" +
 	"\x06lucide\x18\x02 \x01(\tH\x00R\x06lucideB\a\n" +

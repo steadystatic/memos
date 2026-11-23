@@ -70,6 +70,10 @@ func mapSpaceMutationError(err error, operation string) error {
 		return status.Error(codes.FailedPrecondition, "space members must be active users")
 	case errors.Is(err, store.ErrSpaceAlreadyExists):
 		return status.Error(codes.AlreadyExists, "space already exists")
+	case errors.Is(err, store.ErrSpaceKeyTaken):
+		return status.Error(codes.AlreadyExists, "space key already in use")
+	case errors.Is(err, store.ErrInvalidSpaceKey):
+		return status.Error(codes.InvalidArgument, "space key must be 1 to 16 lowercase letters, digits or hyphens, starting and ending with a letter or digit")
 	case errors.Is(err, store.ErrSpaceMemberAlreadyExists):
 		return status.Error(codes.AlreadyExists, "space membership or invitation already exists")
 	case errors.Is(err, store.ErrSpaceInvitationNotFound):
@@ -108,6 +112,7 @@ func (s *APIService) CreateSpace(ctx context.Context, request *apipb.CreateSpace
 		UID:         uid,
 		Title:       title,
 		Description: strings.TrimSpace(request.Space.Description),
+		Key:         strings.TrimSpace(request.Space.Key),
 		Payload:     &storepb.SpacePayload{Icon: icon},
 	}, currentUser.ID)
 	if err != nil {
@@ -208,6 +213,9 @@ func (s *APIService) UpdateSpace(ctx context.Context, request *apipb.UpdateSpace
 		case "description":
 			description := strings.TrimSpace(request.Space.Description)
 			update.Description = &description
+		case "key":
+			key := strings.TrimSpace(request.Space.Key)
+			update.Key = &key
 		case "icon":
 			icon := convertSpaceIconToStore(request.Space.Icon)
 			if err := store.ValidateSpaceIcon(icon); err != nil {

@@ -39,6 +39,17 @@ describe("MobileFormatBar", () => {
     expect(commands.toggleHeading).toHaveBeenCalledWith({ level: 1 });
   });
 
+  it("stays out of the way in landscape", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    );
+    const { editor } = fakeEditor(true);
+    render(<MobileFormatBar editor={editor} />);
+    expect(screen.queryByRole("toolbar")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   it("does not steal focus from the editor on press", () => {
     const { editor } = fakeEditor(true);
     render(<MobileFormatBar editor={editor} />);

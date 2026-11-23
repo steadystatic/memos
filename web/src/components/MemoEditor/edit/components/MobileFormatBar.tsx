@@ -67,7 +67,25 @@ const useKeyboardInset = () => {
   return inset;
 };
 
+/**
+ * Landscape leaves about 120pt above the iPhone keyboard and its accessory bar, which this bar and
+ * the page header would fill, so the bar belongs to portrait only.
+ */
+const usePortrait = () => {
+  const [portrait, setPortrait] = useState(() => typeof matchMedia !== "function" || matchMedia("(orientation: portrait)").matches);
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const query = matchMedia("(orientation: portrait)");
+    const update = () => setPortrait(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return portrait;
+};
+
 const MobileFormatBar = ({ editor }: { editor: Editor | null }) => {
+  const portrait = usePortrait();
   const [focused, setFocused] = useState(false);
   const [, refresh] = useReducer((n: number) => n + 1, 0);
   const inset = useKeyboardInset();
@@ -84,7 +102,7 @@ const MobileFormatBar = ({ editor }: { editor: Editor | null }) => {
     return () => offs.forEach((off) => off());
   }, [editor]);
 
-  if (!editor || !focused) return null;
+  if (!editor || !focused || !portrait) return null;
 
   return createPortal(
     <div

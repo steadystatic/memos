@@ -940,6 +940,27 @@ func TestServeAttachmentFile_RefreshCookieAuthenticatesOwner(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "secret content", rec.Body.String())
+
+	// An authorized private attachment may be kept by the browser but must be revalidated, and an
+	// unchanged one answers the revalidation with a 304 instead of the whole file.
+	require.Equal(t, privateAttachmentRevalidateControl, rec.Header().Get("Cache-Control"))
+	lastModified := rec.Header().Get("Last-Modified")
+	require.NotEmpty(t, lastModified)
+	conditional := httptest.NewRequest(http.MethodGet, url, nil)
+	conditional.AddCookie(&http.Cookie{Name: auth.RefreshTokenCookieName, Value: refreshToken})
+	conditional.Header.Set("If-Modified-Since", lastModified)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, conditional)
+	require.Equal(t, http.StatusNotModified, rec.Code)
+	require.Empty(t, rec.Body.String())
+
+	// Revalidation is still authorized: without credentials the same conditional request is refused.
+	anonymous := httptest.NewRequest(http.MethodGet, url, nil)
+	anonymous.Header.Set("If-Modified-Since", lastModified)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, anonymous)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Equal(t, privateAttachmentCacheControl, rec.Header().Get("Cache-Control"))
 }
 
 // TestServeAttachmentFile_UnlinkedAttachmentOwnerOrAdmin verifies an

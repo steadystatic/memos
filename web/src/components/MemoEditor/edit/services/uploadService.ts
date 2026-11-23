@@ -2,8 +2,14 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { attachmentServiceClient } from "@/connect";
 import type { Attachment, UploadAttachmentRequest } from "@/types/proto/api/attachment_service_pb";
-import { AttachmentSchema, MotionMediaSchema, UploadAttachmentSpecSchema } from "@/types/proto/api/attachment_service_pb";
+import {
+  AttachmentSchema,
+  MediaMetadataSchema,
+  MotionMediaSchema,
+  UploadAttachmentSpecSchema,
+} from "@/types/proto/api/attachment_service_pb";
 import type { LocalFile } from "../types/attachment";
+import { imageDownscaleService } from "./imageDownscaleService";
 
 const DEFAULT_CHUNK_SIZE = 2 * 1024 * 1024;
 // The server allows eight unfinished uploads per user; stay well under it.
@@ -11,8 +17,15 @@ const MAX_CONCURRENT_UPLOADS = 4;
 
 export const uploadService = {
   async uploadFile(localFile: LocalFile, signal?: AbortSignal): Promise<Attachment> {
-    const { file, motionMedia } = localFile;
-    const mediaMetadata = await localFile.mediaMetadata;
+    const { motionMedia } = localFile;
+    // A Live Photo still and a replacement keep their exact bytes; every other photo is scaled down first.
+    const prepared = localFile.replaces || motionMedia ? null : await imageDownscaleService.prepare(localFile.file);
+    const file = prepared?.file ?? localFile.file;
+    let mediaMetadata = await localFile.mediaMetadata;
+    if (prepared && mediaMetadata) {
+      // The metadata was read from the original; its dimensions must describe the stored file.
+      mediaMetadata = create(MediaMetadataSchema, { ...mediaMetadata, width: prepared.width, height: prepared.height });
+    }
     const spec = create(UploadAttachmentSpecSchema, {
       attachment: create(AttachmentSchema, {
         filename: file.name,

@@ -66,7 +66,7 @@ func TestMigrationAttachmentIndex(t *testing.T) {
 			}
 			setting, err := ts.GetUncachedInstanceSetting(ctx, &store.FindInstanceSetting{Name: "BASIC"})
 			require.NoError(t, err)
-			expected := "26.11.2"
+			expected := "26.11.3"
 			if state == "conflict" {
 				expected = "26.10.1"
 			}
@@ -114,10 +114,11 @@ func TestMigrationAttachmentLongType(t *testing.T) {
 	}
 }
 
-// dropSpaceHandleSchema removes what migration 26.11/01 adds, returning a latest-schema database to
-// the shape it had before that migration.
+// dropSpaceHandleSchema removes what migrations 26.11/01 and 26.11/02 add, returning a
+// latest-schema database to the shape it had before those migrations.
 func dropSpaceHandleSchema(ctx context.Context, t *testing.T, ts *store.Store, driver string) {
 	t.Helper()
+	dropCommentHandleSchema(ctx, t, ts)
 	statements := []string{
 		"DROP INDEX idx_space_handle_key",
 		"DROP INDEX idx_memo_space_seq",
@@ -130,6 +131,19 @@ func dropSpaceHandleSchema(ctx context.Context, t *testing.T, ts *store.Store, d
 		statements[1] += " ON memo"
 	}
 	for _, statement := range statements {
+		_, err := ts.GetDriver().GetDB().ExecContext(ctx, statement)
+		require.NoError(t, err, statement)
+	}
+}
+
+// dropCommentHandleSchema removes what migration 26.11/02 adds, returning a latest-schema database
+// to the shape of 26.11.2.
+func dropCommentHandleSchema(ctx context.Context, t *testing.T, ts *store.Store) {
+	t.Helper()
+	for _, statement := range []string{
+		"ALTER TABLE memo DROP COLUMN comment_seq",
+		"ALTER TABLE memo DROP COLUMN next_comment_seq",
+	} {
 		_, err := ts.GetDriver().GetDB().ExecContext(ctx, statement)
 		require.NoError(t, err, statement)
 	}

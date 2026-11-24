@@ -120,9 +120,15 @@ func (s *APIService) ListMemos(ctx context.Context, request *apipb.ListMemosRequ
 		memoFind.OrderByTimeAsc = false
 	}
 
+	handleFiltered := false
 	if request.Filter != "" {
-		if err := s.validateMemoFilterForUser(ctx, request.Filter, currentUser); err != nil {
+		requiresHandle, err := s.validateMemoListFilterForUser(ctx, request.Filter, currentUser)
+		if err != nil {
 			return nil, err
+		}
+		if requiresHandle {
+			handleFiltered = true
+			memoFind.ExcludeComments = false
 		}
 		memoFind.Filters = append(memoFind.Filters, request.Filter)
 	}
@@ -224,6 +230,11 @@ func (s *APIService) ListMemos(ctx context.Context, request *apipb.ListMemosRequ
 				continue
 			}
 			return nil, errors.Wrap(err, "failed to convert memo")
+		}
+
+		// A handle filter must not reveal a Space key to callers who cannot see that handle.
+		if handleFiltered && memoMessage.Handle == "" {
+			continue
 		}
 
 		memoMessages = append(memoMessages, memoMessage)

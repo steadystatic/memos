@@ -206,17 +206,18 @@ func NewSchema() Schema {
 				CompareEq: true,
 			},
 		},
-		// handle is a memo's "<space key>-<number>" label, such as haymakr-12. It is derived, so a
-		// memo outside any Space, and a comment, has none and never matches.
+		// handle is a memo's "<space key>-<number>" label (haymakr-12) or a comment's
+		// "<space key>-<memo number>-<comment number>" label (haymakr-12-3). It is derived, so a
+		// memo outside any Space, and a comment whose parent has no handle, has none and never matches.
 		"handle": {
 			Name:   "handle",
 			Kind:   FieldKindScalar,
 			Type:   FieldTypeString,
 			Column: Column{Table: "memo_space", Name: "handle_key"},
 			Expressions: map[DialectName]string{
-				DialectSQLite:   "CASE WHEN `memo`.`space_seq` IS NULL OR %[1]s IS NULL THEN NULL ELSE (%[1]s || '-' || `memo`.`space_seq`) END",
-				DialectMySQL:    "CASE WHEN `memo`.`space_seq` IS NULL OR %[1]s IS NULL THEN NULL ELSE CONCAT(%[1]s, '-', `memo`.`space_seq`) END",
-				DialectPostgres: "CASE WHEN memo.space_seq IS NULL OR %[1]s IS NULL THEN NULL ELSE (%[1]s || '-' || memo.space_seq) END",
+				DialectSQLite:   "CASE WHEN `memo`.`space_seq` IS NOT NULL AND %[1]s IS NOT NULL THEN (%[1]s || '-' || `memo`.`space_seq`) WHEN `memo`.`comment_seq` IS NOT NULL THEN (SELECT (`handle_parent_space`.`handle_key` || '-' || `handle_parent_memo`.`space_seq` || '-' || `memo`.`comment_seq`) FROM `memo_relation` AS `handle_parent_rel` JOIN `memo` AS `handle_parent_memo` ON `handle_parent_memo`.`id` = `handle_parent_rel`.`related_memo_id` JOIN `space` AS `handle_parent_space` ON `handle_parent_space`.`id` = `handle_parent_memo`.`space_id` WHERE `handle_parent_rel`.`memo_id` = `memo`.`id` AND `handle_parent_rel`.`type` = 'COMMENT' AND `handle_parent_memo`.`space_seq` IS NOT NULL AND `handle_parent_space`.`handle_key` IS NOT NULL ORDER BY `handle_parent_memo`.`id` LIMIT 1) ELSE NULL END",
+				DialectMySQL:    "CASE WHEN `memo`.`space_seq` IS NOT NULL AND %[1]s IS NOT NULL THEN CONCAT(%[1]s, '-', `memo`.`space_seq`) WHEN `memo`.`comment_seq` IS NOT NULL THEN (SELECT CONCAT(`handle_parent_space`.`handle_key`, '-', `handle_parent_memo`.`space_seq`, '-', `memo`.`comment_seq`) FROM `memo_relation` AS `handle_parent_rel` JOIN `memo` AS `handle_parent_memo` ON `handle_parent_memo`.`id` = `handle_parent_rel`.`related_memo_id` JOIN `space` AS `handle_parent_space` ON `handle_parent_space`.`id` = `handle_parent_memo`.`space_id` WHERE `handle_parent_rel`.`memo_id` = `memo`.`id` AND `handle_parent_rel`.`type` = 'COMMENT' AND `handle_parent_memo`.`space_seq` IS NOT NULL AND `handle_parent_space`.`handle_key` IS NOT NULL ORDER BY `handle_parent_memo`.`id` LIMIT 1) ELSE NULL END",
+				DialectPostgres: "CASE WHEN memo.space_seq IS NOT NULL AND %[1]s IS NOT NULL THEN (%[1]s || '-' || memo.space_seq) WHEN memo.comment_seq IS NOT NULL THEN (SELECT (handle_parent_space.handle_key || '-' || handle_parent_memo.space_seq || '-' || memo.comment_seq) FROM memo_relation AS handle_parent_rel JOIN memo AS handle_parent_memo ON handle_parent_memo.id = handle_parent_rel.related_memo_id JOIN space AS handle_parent_space ON handle_parent_space.id = handle_parent_memo.space_id WHERE handle_parent_rel.memo_id = memo.id AND handle_parent_rel.type = 'COMMENT' AND handle_parent_memo.space_seq IS NOT NULL AND handle_parent_space.handle_key IS NOT NULL ORDER BY handle_parent_memo.id LIMIT 1) ELSE NULL END",
 			},
 			AllowedComparisonOps: map[ComparisonOperator]bool{
 				CompareEq: true,

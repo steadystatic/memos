@@ -48,6 +48,44 @@ func TestFormatHandleRoundTrips(t *testing.T) {
 	}
 }
 
+func TestParseCommentHandle(t *testing.T) {
+	for _, tc := range []struct {
+		in         string
+		key        string
+		memoSeq    int32
+		commentSeq int32
+		good       bool
+	}{
+		{"haymakr-12-3", "haymakr", 12, 3, true},
+		{"Haymakr-12-3", "haymakr", 12, 3, true},
+		{" haymakr-7-1 ", "haymakr", 7, 1, true},
+		{"my-space-3-9", "my-space", 3, 9, true},
+		{"a-1-5-2", "a-1", 5, 2, true},
+		{"haymakr-12", "", 0, 0, false},
+		{"haymakr-12-", "", 0, 0, false},
+		{"haymakr-12-0", "", 0, 0, false},
+		{"haymakr-0-1", "", 0, 0, false},
+		{"haymakr-12--1", "", 0, 0, false},
+		{"haymakr-12-x", "", 0, 0, false},
+		{"-12-3", "", 0, 0, false},
+		{"haymakr-12-99999999999", "", 0, 0, false},
+		{"bad key-1-2", "", 0, 0, false},
+	} {
+		key, memoSeq, commentSeq, ok := ParseCommentHandle(tc.in)
+		if ok != tc.good || key != tc.key || memoSeq != tc.memoSeq || commentSeq != tc.commentSeq {
+			t.Errorf("ParseCommentHandle(%q) = (%q, %d, %d, %v), want (%q, %d, %d, %v)",
+				tc.in, key, memoSeq, commentSeq, ok, tc.key, tc.memoSeq, tc.commentSeq, tc.good)
+		}
+	}
+}
+
+func TestFormatCommentHandleRoundTrips(t *testing.T) {
+	key, memoSeq, commentSeq, ok := ParseCommentHandle(FormatCommentHandle("my-space", 42, 7))
+	if !ok || key != "my-space" || memoSeq != 42 || commentSeq != 7 {
+		t.Fatalf("round trip = (%q, %d, %d, %v)", key, memoSeq, commentSeq, ok)
+	}
+}
+
 func TestDeriveSpaceKey(t *testing.T) {
 	for _, tc := range []struct{ uid, title, want string }{
 		{"haymakr", "Haymakr", "haymakr"},

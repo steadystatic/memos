@@ -67,6 +67,9 @@ type Memo struct {
 	// SpaceSeq is the memo's number within its Space, assigned when it is placed there.
 	// It is nil for a memo outside any Space and for comments.
 	SpaceSeq *int32
+	// CommentSeq is a comment's monotonic number within its parent memo.
+	// It is nil for top-level memos.
+	CommentSeq *int32
 
 	// Composed fields
 	ParentUID *string

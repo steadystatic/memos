@@ -69,6 +69,7 @@ func (s *APIService) CreateMemoComment(ctx context.Context, request *apipb.Creat
 		return nil, mapMemoCreateError(err, memoUID, "failed to create memo comment")
 	}
 	memo := prepared.memo
+	memo.ParentUID = &relatedMemo.UID
 	attachments, err := s.Store.ListAttachments(ctx, &store.FindAttachment{MemoID: &memo.ID})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to load memo comment attachments")
@@ -77,7 +78,11 @@ func (s *APIService) CreateMemoComment(ctx context.Context, request *apipb.Creat
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to load memo relations")
 	}
-	memoComment, err := s.convertMemoFromStore(ctx, memo, nil, attachments, relations)
+	parentHandle, err := s.resolveCommentHandleParent(ctx, relatedMemo)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to resolve parent memo handle")
+	}
+	memoComment, err := s.convertMemoFromStoreWithParent(ctx, memo, nil, attachments, relations, map[int32]*store.User{user.ID: user}, parentHandle, true)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to convert memo comment")
 	}
@@ -235,13 +240,17 @@ func (s *APIService) ListMemoComments(ctx context.Context, request *apipb.ListMe
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list memo creators: %v", err)
 	}
+	parentHandle, err := s.resolveCommentHandleParent(ctx, memo)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to resolve parent memo handle: %v", err)
+	}
 	var memosResponse []*apipb.Memo
 	for _, m := range memos {
 		reactions := memoReactionsMap[m.ID]
 		attachments := attachmentMap[m.ID]
 		relations := relationMap[m.ID]
 
-		memoMessage, err := s.convertMemoFromStoreWithCreators(ctx, m, reactions, attachments, relations, creatorMap)
+		memoMessage, err := s.convertMemoFromStoreWithParent(ctx, m, reactions, attachments, relations, creatorMap, parentHandle, true)
 		if err != nil {
 			if stderrors.Is(err, errMemoCreatorNotFound) {
 				slog.Warn("Skipping memo comment with missing creator",

@@ -13,11 +13,22 @@ import (
 )
 
 func (s *APIService) validateMemoFilterForUser(ctx context.Context, filterText string, user *store.User) error {
+	_, err := s.validateMemoListFilterForUser(ctx, filterText, user)
+	return err
+}
+
+// validateMemoListFilterForUser validates a memo list filter and reports whether every matching
+// row must satisfy a handle constraint (so ListMemos can resolve comment handles too).
+func (s *APIService) validateMemoListFilterForUser(ctx context.Context, filterText string, user *store.User) (bool, error) {
 	engine, err := filterpkg.DefaultEngine()
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to initialize filter: %v", err)
+		return false, status.Errorf(codes.Internal, "failed to initialize filter: %v", err)
 	}
-	return s.validateFilterSpaceAccess(ctx, filterText, engine, user)
+	program, err := s.validateFilterSpaceAccess(ctx, filterText, engine, user)
+	if err != nil {
+		return false, err
+	}
+	return filterRequiresHandle(program.ConditionTree(), false), nil
 }
 
 func (s *APIService) validateAttachmentFilterForUser(ctx context.Context, filterText string, user *store.User) error {
@@ -25,27 +36,28 @@ func (s *APIService) validateAttachmentFilterForUser(ctx context.Context, filter
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to initialize filter: %v", err)
 	}
-	return s.validateFilterSpaceAccess(ctx, filterText, engine, user)
+	_, err = s.validateFilterSpaceAccess(ctx, filterText, engine, user)
+	return err
 }
 
-func (s *APIService) validateFilterSpaceAccess(ctx context.Context, filterText string, engine *filterpkg.Engine, user *store.User) error {
+func (s *APIService) validateFilterSpaceAccess(ctx context.Context, filterText string, engine *filterpkg.Engine, user *store.User) (*filterpkg.Program, error) {
 	program, err := engine.Compile(ctx, filterText)
 	if err != nil {
-		return status.Errorf(codes.InvalidArgument, "invalid filter: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid filter: %v", err)
 	}
 	if _, err := program.Render(filterpkg.RenderOptions{Dialect: s.filterDialect()}); err != nil {
-		return status.Errorf(codes.InvalidArgument, "invalid filter: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid filter: %v", err)
 	}
 
 	spaceNames := map[string]struct{}{}
 	if err := collectSpaceFilterNames(program.ConditionTree(), false, spaceNames); err != nil {
-		return status.Errorf(codes.InvalidArgument, "invalid filter: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid filter: %v", err)
 	}
 	if len(spaceNames) == 0 {
-		return nil
+		return program, nil
 	}
 	if user == nil {
-		return status.Error(codes.Unauthenticated, "user not authenticated")
+		return nil, status.Error(codes.Unauthenticated, "user not authenticated")
 	}
 
 	names := make([]string, 0, len(spaceNames))
@@ -55,10 +67,10 @@ func (s *APIService) validateFilterSpaceAccess(ctx context.Context, filterText s
 	slices.Sort(names)
 	for _, name := range names {
 		if _, err := s.resolveWritableSpaceByName(ctx, name, user.ID); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return program, nil
 }
 
 func collectSpaceFilterNames(condition filterpkg.Condition, negated bool, names map[string]struct{}) error {
@@ -138,4 +150,33 @@ func valueReferencesSpace(value filterpkg.ValueExpr) bool {
 		// Other value expressions cannot reference a space.
 	}
 	return false
+}
+
+// filterRequiresHandle reports whether every row matching condition must satisfy a positive
+// handle equality or membership predicate. ListMemos uses this to include comments when resolving
+// a handle such as "haymakr-12-3" without leaking comments into ordinary feed queries.
+func filterRequiresHandle(condition filterpkg.Condition, negated bool) bool {
+	switch condition := condition.(type) {
+	case *filterpkg.LogicalCondition:
+		if (condition.Operator == filterpkg.LogicalAnd && !negated) || (condition.Operator == filterpkg.LogicalOr && negated) {
+			return filterRequiresHandle(condition.Left, negated) || filterRequiresHandle(condition.Right, negated)
+		}
+		return filterRequiresHandle(condition.Left, negated) && filterRequiresHandle(condition.Right, negated)
+	case *filterpkg.NotCondition:
+		return filterRequiresHandle(condition.Expr, !negated)
+	case *filterpkg.ComparisonCondition:
+		if negated || condition.Operator != filterpkg.CompareEq {
+			return false
+		}
+		return isHandleFieldRef(condition.Left) || isHandleFieldRef(condition.Right)
+	case *filterpkg.InCondition:
+		return !negated && isHandleFieldRef(condition.Left)
+	default:
+		return false
+	}
+}
+
+func isHandleFieldRef(value filterpkg.ValueExpr) bool {
+	field, ok := value.(*filterpkg.FieldRef)
+	return ok && field.Name == "handle"
 }

@@ -42,7 +42,7 @@ func (d *DB) ApplyMemoMutation(ctx context.Context, mutation *store.MemoMutation
 				return err
 			}
 		}
-		if err := insertPostgresMemo(ctx, tx, create, mutation.CommentContextMemoID == nil); err != nil {
+		if err := insertPostgresMemo(ctx, tx, create, mutation.CommentContextMemoID); err != nil {
 			return err
 		}
 		mutation.MemoID = create.ID
@@ -190,15 +190,17 @@ type memoUpdateExecer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-// nextPostgresMemoSpaceSeq numbers a memo being placed in a Space. It returns nil when the memo is
-// already there, so its number stays. The caller must hold a transaction, because the counter bump
-// and the memo write have to commit together.
+// nextPostgresMemoSpaceSeq numbers a top-level memo being placed in a Space. It returns nil when
+// the memo is already there (keeping its number) or is a comment (comments are numbered under
+// their parent memo instead). The caller must hold a transaction, because the counter bump and
+// the memo write have to commit together.
 func nextPostgresMemoSpaceSeq(ctx context.Context, executor memoUpdateExecer, memoID, spaceID int32) (*int32, error) {
 	var current sql.NullInt32
-	if err := executor.QueryRowContext(ctx, "SELECT space_id FROM memo WHERE id = $1", memoID).Scan(&current); err != nil {
+	var commentSeq sql.NullInt32
+	if err := executor.QueryRowContext(ctx, "SELECT space_id, comment_seq FROM memo WHERE id = $1", memoID).Scan(&current, &commentSeq); err != nil {
 		return nil, errors.Wrap(err, "failed to read memo space")
 	}
-	if current.Valid && current.Int32 == spaceID {
+	if commentSeq.Valid || (current.Valid && current.Int32 == spaceID) {
 		return nil, nil
 	}
 	return allocatePostgresSpaceSeq(ctx, executor, spaceID)
@@ -211,6 +213,17 @@ func allocatePostgresSpaceSeq(ctx context.Context, executor interface {
 	var seq int32
 	if err := executor.QueryRowContext(ctx, "UPDATE space SET next_seq = next_seq + 1 WHERE id = $1 RETURNING next_seq - 1", spaceID).Scan(&seq); err != nil {
 		return nil, errors.Wrap(err, "failed to allocate memo space number")
+	}
+	return &seq, nil
+}
+
+// allocatePostgresCommentSeq takes the next comment number from a parent memo's counter. Numbers are never reused.
+func allocatePostgresCommentSeq(ctx context.Context, executor interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, parentMemoID int32) (*int32, error) {
+	var seq int32
+	if err := executor.QueryRowContext(ctx, "UPDATE memo SET next_comment_seq = next_comment_seq + 1 WHERE id = $1 RETURNING next_comment_seq - 1", parentMemoID).Scan(&seq); err != nil {
+		return nil, errors.Wrap(err, "failed to allocate comment number")
 	}
 	return &seq, nil
 }

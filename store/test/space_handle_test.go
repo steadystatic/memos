@@ -43,12 +43,51 @@ func TestSpaceHandleNumbering(t *testing.T) {
 	require.Equal(t, int32(1), *other.SpaceSeq, "each Space counts on its own")
 	require.Nil(t, loose.SpaceSeq, "a memo outside any Space has no number")
 
-	t.Run("comments are not numbered", func(t *testing.T) {
-		comment, err := ts.CreateMemoComment(ctx, &store.Memo{UID: "handle-comment", CreatorID: owner.ID, Content: "c", Visibility: store.Private, SpaceID: &hay.ID}, a.ID, owner.ID)
+	t.Run("comments get per-parent numbers without taking a memo space_seq", func(t *testing.T) {
+		comment1, err := ts.CreateMemoComment(ctx, &store.Memo{UID: "handle-comment-1", CreatorID: owner.ID, Content: "c1", Visibility: store.Private, SpaceID: &hay.ID}, a.ID, owner.ID)
 		require.NoError(t, err)
-		require.Nil(t, comment.SpaceSeq)
+		require.Nil(t, comment1.SpaceSeq)
+		require.NotNil(t, comment1.CommentSeq)
+		require.Equal(t, int32(1), *comment1.CommentSeq)
+
+		comment2, err := ts.CreateMemoComment(ctx, &store.Memo{UID: "handle-comment-2", CreatorID: owner.ID, Content: "c2", Visibility: store.Private}, a.ID, owner.ID)
+		require.NoError(t, err)
+		require.Nil(t, comment2.SpaceSeq)
+		require.Equal(t, int32(2), *comment2.CommentSeq)
+
+		// Moving a comment into a Space must not allocate a memo space_seq.
+		require.NoError(t, ts.UpdateMemo(ctx, &store.UpdateMemo{ID: comment2.ID, SpaceID: &hay.ID}))
+		reloaded, err := ts.GetMemo(ctx, &store.FindMemo{ID: &comment2.ID})
+		require.NoError(t, err)
+		require.Nil(t, reloaded.SpaceSeq)
+		require.Equal(t, int32(2), *reloaded.CommentSeq)
+
+		// Deleting a comment leaves a gap; numbers are never reused.
+		require.NoError(t, ts.DeleteMemo(ctx, &store.DeleteMemo{ID: comment1.ID}))
+		comment3, err := ts.CreateMemoComment(ctx, &store.Memo{UID: "handle-comment-3", CreatorID: owner.ID, Content: "c3", Visibility: store.Private, SpaceID: &hay.ID}, a.ID, owner.ID)
+		require.NoError(t, err)
+		require.Equal(t, int32(3), *comment3.CommentSeq)
+
+		// Comment handles resolve through the filter; deleted ones do not.
+		require.Empty(t, listByHandle("haymakr-1-1"))
+		foundComment := listByHandle("haymakr-1-2")
+		require.Len(t, foundComment, 1)
+		require.Equal(t, "handle-comment-2", foundComment[0].UID)
+		require.Equal(t, "handle-comment-3", listByHandle("haymakr-1-3")[0].UID)
+
+		// Comments on an unplaced memo have no handle until the parent enters a Space.
+		looseComment, err := ts.CreateMemoComment(ctx, &store.Memo{UID: "handle-loose-comment", CreatorID: owner.ID, Content: "lc", Visibility: store.Private}, loose.ID, owner.ID)
+		require.NoError(t, err)
+		require.Equal(t, int32(1), *looseComment.CommentSeq)
+
+		// Replies to comments (depth > 1) have no handle.
+		reply, err := ts.CreateMemoComment(ctx, &store.Memo{UID: "handle-reply", CreatorID: owner.ID, Content: "r", Visibility: store.Private, SpaceID: &hay.ID}, comment2.ID, owner.ID)
+		require.NoError(t, err)
+		require.Equal(t, int32(1), *reply.CommentSeq)
+		require.Empty(t, listByHandle("haymakr-1-2-1"))
+
 		next := create("handle-c", &hay.ID)
-		require.Equal(t, int32(3), *next.SpaceSeq, "the comment did not take a number")
+		require.Equal(t, int32(3), *next.SpaceSeq, "comments did not take a memo space_seq")
 	})
 
 	t.Run("the handle resolves through the filter", func(t *testing.T) {
@@ -69,6 +108,8 @@ func TestSpaceHandleNumbering(t *testing.T) {
 		require.Equal(t, "lab", moved.SpaceKey)
 		require.Empty(t, listByHandle("haymakr-1"), "the old handle no longer resolves")
 		require.Equal(t, "handle-a", listByHandle("lab-2")[0].UID)
+		require.Empty(t, listByHandle("haymakr-1-2"), "old comment handles stop resolving when parent moves")
+		require.Equal(t, "handle-comment-2", listByHandle("lab-2-2")[0].UID, "comment handles follow parent memo")
 	})
 
 	t.Run("staying put keeps the number", func(t *testing.T) {

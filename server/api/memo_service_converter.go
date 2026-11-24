@@ -24,6 +24,13 @@ var (
 	errReactionCreatorNotFound = stderrors.New("reaction creator not found")
 )
 
+// commentHandleParent holds the already-authorized Space key and sequence number of a comment's
+// parent memo, so a batch of comments (such as ListMemoComments) resolves it once.
+type commentHandleParent struct {
+	spaceKey string
+	memoSeq  int32
+}
+
 func (s *APIService) convertMemoFromStore(ctx context.Context, memo *store.Memo, reactions []*store.Reaction, attachments []*store.Attachment, relations []*apipb.MemoRelation) (*apipb.Memo, error) {
 	creatorMap, err := s.listUsersByID(ctx, []int32{memo.CreatorID})
 	if err != nil {
@@ -33,6 +40,10 @@ func (s *APIService) convertMemoFromStore(ctx context.Context, memo *store.Memo,
 }
 
 func (s *APIService) convertMemoFromStoreWithCreators(ctx context.Context, memo *store.Memo, reactions []*store.Reaction, attachments []*store.Attachment, relations []*apipb.MemoRelation, creatorMap map[int32]*store.User) (*apipb.Memo, error) {
+	return s.convertMemoFromStoreWithParent(ctx, memo, reactions, attachments, relations, creatorMap, nil, false)
+}
+
+func (s *APIService) convertMemoFromStoreWithParent(ctx context.Context, memo *store.Memo, reactions []*store.Reaction, attachments []*store.Attachment, relations []*apipb.MemoRelation, creatorMap map[int32]*store.User, parentHandle *commentHandleParent, parentResolved bool) (*apipb.Memo, error) {
 	name := buildMemoName(memo.UID)
 	creator := creatorMap[memo.CreatorID]
 	if creator == nil {
@@ -60,6 +71,11 @@ func (s *APIService) convertMemoFromStoreWithCreators(ctx context.Context, memo 
 	}
 	if err := s.projectMemoCollaborationContext(ctx, memo, memoMessage, readContext); err != nil {
 		return nil, errors.Wrap(err, "failed to project memo collaboration context")
+	}
+	if memoMessage.Handle == "" && memo.CommentSeq != nil && memo.ParentUID != nil {
+		if err := s.projectCommentHandle(ctx, memo, memoMessage, parentHandle, parentResolved); err != nil {
+			return nil, errors.Wrap(err, "failed to project comment handle")
+		}
 	}
 	if memo.Payload != nil {
 		memoMessage.Tags = memo.Payload.Tags
@@ -138,6 +154,50 @@ func (s *APIService) projectMemoCollaborationContext(ctx context.Context, memo *
 	// The handle names the Space by its key, so it is shown on the same terms as the placement.
 	if memo.SpaceSeq != nil && space.Key != "" {
 		message.Handle = identifier.FormatHandle(space.Key, *memo.SpaceSeq)
+	}
+	return nil
+}
+
+// resolveCommentHandleParent resolves the Space key and memo number of a comment's parent memo
+// when the viewer is allowed to read the parent and see its Space placement.
+func (s *APIService) resolveCommentHandleParent(ctx context.Context, parent *store.Memo) (*commentHandleParent, error) {
+	if parent == nil || parent.SpaceID == nil || parent.SpaceSeq == nil {
+		return nil, nil
+	}
+	readContext, err := s.buildMemoReadContext(ctx, parent, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !access.CheckMemoReadContext(readContext).Allowed() || !readContext.SpaceValid {
+		return nil, nil
+	}
+	viewer := readContext.Viewer
+	if viewer == nil || (viewer.ID != parent.CreatorID && !readContext.ViewerSpaceMember && !access.IsInstanceAdmin(viewer)) {
+		return nil, nil
+	}
+	space, err := s.Store.GetSpace(ctx, &store.FindSpace{ID: parent.SpaceID})
+	if err != nil {
+		return nil, err
+	}
+	if space == nil || space.Key == "" {
+		return nil, nil
+	}
+	return &commentHandleParent{spaceKey: space.Key, memoSeq: *parent.SpaceSeq}, nil
+}
+
+func (s *APIService) projectCommentHandle(ctx context.Context, memo *store.Memo, message *apipb.Memo, parentHandle *commentHandleParent, parentResolved bool) error {
+	if !parentResolved {
+		parent, err := s.Store.GetMemo(ctx, &store.FindMemo{UID: memo.ParentUID})
+		if err != nil {
+			return err
+		}
+		parentHandle, err = s.resolveCommentHandleParent(ctx, parent)
+		if err != nil {
+			return err
+		}
+	}
+	if parentHandle != nil {
+		message.Handle = identifier.FormatCommentHandle(parentHandle.spaceKey, parentHandle.memoSeq, *memo.CommentSeq)
 	}
 	return nil
 }

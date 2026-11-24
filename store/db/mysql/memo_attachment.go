@@ -42,7 +42,7 @@ func (d *DB) ApplyMemoMutation(ctx context.Context, mutation *store.MemoMutation
 				return err
 			}
 		}
-		created, err := insertMySQLMemo(ctx, tx, create, mutation.CommentContextMemoID == nil)
+		created, err := insertMySQLMemo(ctx, tx, create, mutation.CommentContextMemoID)
 		if err != nil {
 			return err
 		}
@@ -186,15 +186,17 @@ func replaceMemoReferenceRelations(ctx context.Context, tx *sql.Tx, memoID int32
 	return nil
 }
 
-// nextMySQLMemoSpaceSeq numbers a memo being placed in a Space. It returns nil when the memo is
-// already there, so its number stays. The caller must hold a transaction, because the counter bump
-// and the memo write have to commit together.
+// nextMySQLMemoSpaceSeq numbers a top-level memo being placed in a Space. It returns nil when the
+// memo is already there (keeping its number) or is a comment (comments are numbered under their
+// parent memo instead). The caller must hold a transaction, because the counter bump and the memo
+// write have to commit together.
 func nextMySQLMemoSpaceSeq(ctx context.Context, executor memoUpdateExecer, memoID, spaceID int32) (*int32, error) {
 	var current sql.NullInt32
-	if err := executor.QueryRowContext(ctx, "SELECT `space_id` FROM `memo` WHERE `id` = ?", memoID).Scan(&current); err != nil {
+	var commentSeq sql.NullInt32
+	if err := executor.QueryRowContext(ctx, "SELECT `space_id`, `comment_seq` FROM `memo` WHERE `id` = ?", memoID).Scan(&current, &commentSeq); err != nil {
 		return nil, errors.Wrap(err, "failed to read memo space")
 	}
-	if current.Valid && current.Int32 == spaceID {
+	if commentSeq.Valid || (current.Valid && current.Int32 == spaceID) {
 		return nil, nil
 	}
 	return allocateMySQLSpaceSeq(ctx, executor, spaceID)
@@ -209,6 +211,19 @@ func allocateMySQLSpaceSeq(ctx context.Context, executor memoUpdateExecer, space
 	var seq int32
 	if err := executor.QueryRowContext(ctx, "SELECT `next_seq` - 1 FROM `space` WHERE `id` = ?", spaceID).Scan(&seq); err != nil {
 		return nil, errors.Wrap(err, "failed to read allocated memo space number")
+	}
+	return &seq, nil
+}
+
+// allocateMySQLCommentSeq takes the next comment number from a parent memo's counter, which the
+// UPDATE holds a row lock on until the transaction ends. Numbers are never reused.
+func allocateMySQLCommentSeq(ctx context.Context, executor memoUpdateExecer, parentMemoID int32) (*int32, error) {
+	if _, err := executor.ExecContext(ctx, "UPDATE `memo` SET `next_comment_seq` = `next_comment_seq` + 1 WHERE `id` = ?", parentMemoID); err != nil {
+		return nil, errors.Wrap(err, "failed to allocate comment number")
+	}
+	var seq int32
+	if err := executor.QueryRowContext(ctx, "SELECT `next_comment_seq` - 1 FROM `memo` WHERE `id` = ?", parentMemoID).Scan(&seq); err != nil {
+		return nil, errors.Wrap(err, "failed to read allocated comment number")
 	}
 	return &seq, nil
 }

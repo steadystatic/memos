@@ -717,8 +717,10 @@ paths:
                        space (string resource name, or null when the memo has no space;
                          supports == and comparisons against null, e.g. space != null),
                        handle (string, a memo's "<space key>-<number>" label such as
-                         "haymakr-12"; lowercase, supports ==; memos outside a space and
-                         comments have none),
+                         "haymakr-12" or a comment's "<space key>-<memo number>-<comment number>"
+                         label such as "haymakr-12-3"; lowercase, supports ==; filtering by
+                         handle includes comments; memos outside a space and comments whose
+                         parent has no handle never match),
                        tags (list<string>; match with `"work" in tags`, not `tag == "work"`),
                        has_task_list / has_link / has_code / has_incomplete_tasks (bool),
                        has_location (bool; true when the memo has a location attached),
@@ -730,7 +732,7 @@ paths:
                      Examples:
                        pinned == true && visibility == "PUBLIC"
                        space == "spaces/team" or space == null
-                       handle == "haymakr-12"
+                       handle == "haymakr-12" or handle == "haymakr-12-3"
                        tags.exists(t, t == "urgent")
                        content.contains("roadmap") && created_ts > now - duration("168h")
                   schema:
@@ -4652,11 +4654,14 @@ components:
                     readOnly: true
                     type: string
                     description: |-
-                        Output only. The memo's short, human-readable handle, "<space key>-<number>"
-                         such as "haymakr-12". It is empty for a memo outside any space and for a
-                         comment, and it changes when the memo moves to another space. Find a memo by
-                         handle with the list filter `handle == "haymakr-12"`. Shown only to the
-                         viewers who can see the memo's space.
+                        Output only. The short, human-readable handle: "<space key>-<number>" (such
+                         as "haymakr-12") for a top-level memo in a space, or
+                         "<space key>-<memo number>-<comment number>" (such as "haymakr-12-3") for a
+                         direct comment on one. Empty for memos outside any space and comments whose
+                         parent has no handle. Changes when the memo (or a comment's parent) moves to
+                         another space. Resolve either form with the list filter
+                         `handle == "haymakr-12"` or `handle == "haymakr-12-3"`. Shown only to
+                         viewers who can see the relevant space (and parent memo for a comment).
             description: Memo is a Markdown note written by a user.
         MemoRelation:
             required:

@@ -210,6 +210,9 @@ func (s *APIService) GetSharedMemo(ctx context.Context, request *apipb.GetShared
 	// A share token grants access to this memo only, not to its surrounding
 	// conversation or relation graph.
 	memoMessage.Parent = nil
+	if memo.ParentUID != nil {
+		memoMessage.Handle = ""
+	}
 	return memoMessage, nil
 }
 

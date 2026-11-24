@@ -67,7 +67,9 @@ CREATE TABLE `memo` (
   `pinned` BOOLEAN NOT NULL DEFAULT FALSE,
   `payload` JSON NOT NULL,
   `space_id` INT DEFAULT NULL,
-  `space_seq` INT NULL
+  `space_seq` INT NULL,
+  `comment_seq` INT NULL,
+  `next_comment_seq` INT NOT NULL DEFAULT 1
 );
 
 CREATE UNIQUE INDEX `idx_memo_space_seq` ON `memo`(`space_id`, `space_seq`);

@@ -3,8 +3,9 @@ import { toast } from "@/lib/toast";
 import { useTranslate } from "@/utils/i18n";
 
 /**
- * Fork: a memo's short handle ("haymakr-12"), small and muted beside its time. Tapping it copies the
- * handle, which names the memo to people and, through the list filter, to the Agent.
+ * Fork: a memo's or comment's short handle ("haymakr-12" or "haymakr-12-3"), small and muted
+ * beside its time or preview row. Tapping it copies the handle, which names the memo or comment
+ * to people and, through the list filter, to the Agent.
  */
 const MemoHandle = ({ handle }: { handle: string }) => {
   const t = useTranslate();

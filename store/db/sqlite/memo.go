@@ -22,7 +22,7 @@ func (d *DB) CreateMemo(ctx context.Context, create *store.Memo) (*store.Memo, e
 	if err := validateSQLiteMemoCreate(ctx, tx, create); err != nil {
 		return nil, err
 	}
-	if err := insertSQLiteMemo(ctx, tx, create, true); err != nil {
+	if err := insertSQLiteMemo(ctx, tx, create, nil); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -31,19 +31,11 @@ func (d *DB) CreateMemo(ctx context.Context, create *store.Memo) (*store.Memo, e
 	return create, nil
 }
 
-// insertSQLiteMemo inserts a memo. A numbered memo placed in a Space takes the next number from the
-// Space's counter; comments are not numbered.
-func insertSQLiteMemo(ctx context.Context, tx dbExecutor, create *store.Memo, numbered bool) error {
+// insertSQLiteMemo inserts a memo. A top-level memo placed in a Space takes the next number from
+// the Space's counter; a comment takes the next number from its parent memo's comment counter.
+func insertSQLiteMemo(ctx context.Context, tx dbExecutor, create *store.Memo, commentParentID *int32) error {
 	fields := []string{"`uid`", "`creator_id`", "`content`", "`visibility`", "`payload`", "`space_id`"}
 	placeholder := []string{"?", "?", "?", "?", "?", "?"}
-	if create.SpaceID != nil && numbered {
-		seq, err := allocateSQLiteSpaceSeq(ctx, tx, *create.SpaceID)
-		if err != nil {
-			return err
-		}
-		create.SpaceSeq = seq
-		fields, placeholder = append(fields, "`space_seq`"), append(placeholder, "?")
-	}
 	payload := "{}"
 	if create.Payload != nil {
 		payloadBytes, err := protojson.Marshal(create.Payload)
@@ -53,8 +45,20 @@ func insertSQLiteMemo(ctx context.Context, tx dbExecutor, create *store.Memo, nu
 		payload = string(payloadBytes)
 	}
 	args := []any{create.UID, create.CreatorID, create.Content, create.Visibility, payload, create.SpaceID}
-	if create.SpaceSeq != nil {
-		args = append(args, *create.SpaceSeq)
+	if commentParentID != nil {
+		seq, err := allocateSQLiteCommentSeq(ctx, tx, *commentParentID)
+		if err != nil {
+			return err
+		}
+		create.CommentSeq = seq
+		fields, placeholder, args = append(fields, "`comment_seq`"), append(placeholder, "?"), append(args, *seq)
+	} else if create.SpaceID != nil {
+		seq, err := allocateSQLiteSpaceSeq(ctx, tx, *create.SpaceID)
+		if err != nil {
+			return err
+		}
+		create.SpaceSeq = seq
+		fields, placeholder, args = append(fields, "`space_seq`"), append(placeholder, "?"), append(args, *seq)
 	}
 
 	// Add custom timestamps if provided
@@ -223,6 +227,7 @@ func (d *DB) ListMemos(ctx context.Context, find *store.FindMemo) ([]*store.Memo
 		"`memo`.`payload` AS `payload`",
 		"`memo`.`space_id` AS `space_id`",
 		"`memo`.`space_seq` AS `space_seq`",
+		"`memo`.`comment_seq` AS `comment_seq`",
 		"COALESCE(`memo_space`.`handle_key`, '') AS `space_key`",
 		`(SELECT parent_memo.uid
 			FROM memo_relation AS parent_relation
@@ -268,6 +273,7 @@ func (d *DB) ListMemos(ctx context.Context, find *store.FindMemo) ([]*store.Memo
 			&payloadBytes,
 			&memo.SpaceID,
 			&memo.SpaceSeq,
+			&memo.CommentSeq,
 			&memo.SpaceKey,
 			&memo.ParentUID,
 		}

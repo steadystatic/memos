@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import {
   METADATA_COMPACT_ROW_CLASSES,
+  METADATA_ROW_BOX_CLASSES,
+  METADATA_ROW_LABEL_CLASSES,
   METADATA_ROW_LIST_CLASSES,
   METADATA_ROW_SLOT_CLASSES,
 } from "@/components/MemoMetadata/MetadataSection";
@@ -15,6 +17,7 @@ import { useTranslate } from "@/utils/i18n";
 import UserAvatar from "../../UserAvatar";
 import { useMemoViewContext, useMemoViewDerived } from "../MemoViewContext";
 import { createMemoNavigationState } from "../navigation";
+import MemoHandle from "./MemoHandle";
 
 /** The strip previews this many comments; the rest are behind its trailing link. */
 const COMMENT_PREVIEW_LIMIT = 3;
@@ -56,25 +59,27 @@ const MemoCommentListView: React.FC = () => {
           const uid = extractMemoIdFromName(comment.name);
           const creator = commentCreators?.get(comment.creator);
           return (
-            <Link
-              key={comment.name}
-              to={`/${memo.name}#${uid}`}
-              state={createMemoNavigationState(parentPage)}
-              viewTransition
-              className={METADATA_COMPACT_ROW_CLASSES}
-            >
-              <span className={METADATA_ROW_SLOT_CLASSES} aria-hidden="true">
-                <UserAvatar className="size-4" avatarUrl={creator?.avatarUrl} name={creator?.displayName || creator?.username} />
-              </span>
-              <MemoPreview
-                className="min-w-0 flex-1"
-                content={comment.snippet || comment.content}
-                attachments={comment.attachments}
-                creator={creator}
-                showCreator
-                truncate
-              />
-            </Link>
+            <div key={comment.name} className={cn(METADATA_ROW_BOX_CLASSES, "h-6")}>
+              <Link
+                to={`/${memo.name}#${uid}`}
+                state={createMemoNavigationState(parentPage)}
+                viewTransition
+                className={METADATA_ROW_LABEL_CLASSES}
+              >
+                <span className={METADATA_ROW_SLOT_CLASSES} aria-hidden="true">
+                  <UserAvatar className="size-4" avatarUrl={creator?.avatarUrl} name={creator?.displayName || creator?.username} />
+                </span>
+                <MemoPreview
+                  className="min-w-0 flex-1"
+                  content={comment.snippet || comment.content}
+                  attachments={comment.attachments}
+                  creator={creator}
+                  showCreator
+                  truncate
+                />
+              </Link>
+              <MemoHandle handle={comment.handle} />
+            </div>
           );
         })}
         {commentAmount > COMMENT_PREVIEW_LIMIT && (

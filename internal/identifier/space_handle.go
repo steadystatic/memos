@@ -20,6 +20,11 @@ func FormatHandle(spaceKey string, seq int32) string {
 	return spaceKey + "-" + strconv.FormatInt(int64(seq), 10)
 }
 
+// FormatCommentHandle returns a comment's human-readable handle, such as "haymakr-12-3".
+func FormatCommentHandle(spaceKey string, memoSeq, commentSeq int32) string {
+	return FormatHandle(spaceKey, memoSeq) + "-" + strconv.FormatInt(int64(commentSeq), 10)
+}
+
 // ParseHandle splits a handle into its Space key and number. The number follows the last hyphen,
 // so keys may contain hyphens themselves. The key is case-folded, so "Haymakr-12" finds "haymakr-12".
 func ParseHandle(handle string) (spaceKey string, seq int32, ok bool) {
@@ -33,6 +38,26 @@ func ParseHandle(handle string) (spaceKey string, seq int32, ok bool) {
 		return "", 0, false
 	}
 	return handle[:i], int32(n), true
+}
+
+// ParseCommentHandle splits a comment handle into its Space key, memo number and comment number.
+// The two numbers follow the last two hyphens, so keys may contain hyphens themselves. The key is
+// case-folded, so "Haymakr-12-3" finds "haymakr-12-3".
+func ParseCommentHandle(handle string) (spaceKey string, memoSeq, commentSeq int32, ok bool) {
+	handle = strings.ToLower(strings.TrimSpace(handle))
+	i := strings.LastIndex(handle, "-")
+	if i <= 0 || i == len(handle)-1 {
+		return "", 0, 0, false
+	}
+	c, err := strconv.ParseInt(handle[i+1:], 10, 32)
+	if err != nil || c <= 0 {
+		return "", 0, 0, false
+	}
+	spaceKey, memoSeq, ok = ParseHandle(handle[:i])
+	if !ok {
+		return "", 0, 0, false
+	}
+	return spaceKey, memoSeq, int32(c), true
 }
 
 // DeriveSpaceKey proposes a short key for a new Space. A short uid is already one; otherwise the

@@ -23,7 +23,7 @@ func (d *DB) CreateMemo(ctx context.Context, create *store.Memo) (*store.Memo, e
 	if err := validateMySQLMemoCreate(ctx, tx, create); err != nil {
 		return nil, err
 	}
-	memo, err := insertMySQLMemo(ctx, tx, create, true)
+	memo, err := insertMySQLMemo(ctx, tx, create, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -33,9 +33,9 @@ func (d *DB) CreateMemo(ctx context.Context, create *store.Memo) (*store.Memo, e
 	return memo, nil
 }
 
-// insertMySQLMemo inserts a memo. A numbered memo placed in a Space takes the next number from the
-// Space's counter; comments are not numbered.
-func insertMySQLMemo(ctx context.Context, tx *sql.Tx, create *store.Memo, numbered bool) (*store.Memo, error) {
+// insertMySQLMemo inserts a memo. A top-level memo placed in a Space takes the next number from
+// the Space's counter; a comment takes the next number from its parent memo's comment counter.
+func insertMySQLMemo(ctx context.Context, tx *sql.Tx, create *store.Memo, commentParentID *int32) (*store.Memo, error) {
 	fields := []string{"`uid`", "`creator_id`", "`content`", "`visibility`", "`payload`", "`space_id`"}
 	placeholder := []string{"?", "?", "?", "?", "?", "?"}
 	payload := "{}"
@@ -48,7 +48,15 @@ func insertMySQLMemo(ctx context.Context, tx *sql.Tx, create *store.Memo, number
 	}
 	args := []any{create.UID, create.CreatorID, create.Content, create.Visibility, payload, create.SpaceID}
 	var allocatedSeq *int32
-	if create.SpaceID != nil && numbered {
+	var allocatedCommentSeq *int32
+	if commentParentID != nil {
+		seq, err := allocateMySQLCommentSeq(ctx, tx, *commentParentID)
+		if err != nil {
+			return nil, err
+		}
+		allocatedCommentSeq = seq
+		fields, placeholder, args = append(fields, "`comment_seq`"), append(placeholder, "?"), append(args, *seq)
+	} else if create.SpaceID != nil {
 		seq, err := allocateMySQLSpaceSeq(ctx, tx, *create.SpaceID)
 		if err != nil {
 			return nil, err
@@ -89,9 +97,10 @@ func insertMySQLMemo(ctx context.Context, tx *sql.Tx, create *store.Memo, number
 	if err != nil {
 		return nil, err
 	}
-	// The number is known from the allocation, so the read-back needs no column that a database
+	// The numbers are known from the allocation, so the read-back needs no columns that a database
 	// not yet migrated would lack.
 	memo.SpaceSeq = allocatedSeq
+	memo.CommentSeq = allocatedCommentSeq
 	memo.Payload = &storepb.MemoPayload{}
 	if err := protojsonUnmarshaler.Unmarshal(payloadBytes, memo.Payload); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal payload")
@@ -240,6 +249,7 @@ func (d *DB) ListMemos(ctx context.Context, find *store.FindMemo) ([]*store.Memo
 		"`memo`.`payload` AS `payload`",
 		"`memo`.`space_id` AS `space_id`",
 		"`memo`.`space_seq` AS `space_seq`",
+		"`memo`.`comment_seq` AS `comment_seq`",
 		"COALESCE(`memo_space`.`handle_key`, '') AS `space_key`",
 		`(SELECT parent_memo.uid
 			FROM memo_relation AS parent_relation
@@ -286,6 +296,7 @@ func (d *DB) ListMemos(ctx context.Context, find *store.FindMemo) ([]*store.Memo
 			&payloadBytes,
 			&memo.SpaceID,
 			&memo.SpaceSeq,
+			&memo.CommentSeq,
 			&memo.SpaceKey,
 			&memo.ParentUID,
 		}

@@ -118,8 +118,14 @@ func TestRenderHandleFilter(t *testing.T) {
 		statement, err := engine.CompileToStatement(context.Background(), `handle == "haymakr-12"`, RenderOptions{Dialect: dialect})
 		require.NoError(t, err, dialect)
 		require.Contains(t, statement.SQL, "space_seq", dialect)
+		require.Contains(t, statement.SQL, "comment_seq", dialect)
 		require.Contains(t, statement.SQL, "handle_key", dialect)
 		require.Equal(t, []any{"haymakr-12"}, statement.Args, dialect)
+
+		commentStmt, err := engine.CompileToStatement(context.Background(), `handle == "haymakr-12-3"`, RenderOptions{Dialect: dialect})
+		require.NoError(t, err, dialect)
+		require.Contains(t, commentStmt.SQL, "comment_seq", dialect)
+		require.Equal(t, []any{"haymakr-12-3"}, commentStmt.Args, dialect)
 	}
 
 	_, err = engine.Compile(context.Background(), `handle != "haymakr-12"`)
